@@ -1,0 +1,165 @@
+# Modo Jogo e Limpeza
+
+**Game Mode and safe storage cleanup for Windows, in a single ~2 MB native app.**
+
+*Modo Jogo e Limpeza* is Portuguese for "Game Mode & Cleanup". It prepares the computer for a gaming session and puts it back the way it was afterwards. It can also find and remove temporary files, caches and leftovers, deleting nothing until you confirm.
+
+> The interface is currently in Brazilian Portuguese only. Other languages are on the [roadmap](#roadmap).
+
+## Features
+
+### Game Mode
+
+- **Status overview**: heavy programs that are open, WSL, charger, Windows power mode (including when Energy Saver is limiting it), available memory, refresh rate of each display, and the thermal mode on Lenovo laptops.
+- **Safe program closing**: each program is first asked to close through its window, the same as clicking ✕, so it can save its work. It is terminated only if its policy allows:
+  - `Never` (default for editors);
+  - `WhenWindowless` (only when it is just running in the background);
+  - `Always`.
+- **WSL shutdown**: WSL is shut down unless some program is still using it.
+- **Best performance**: switches the Windows power mode to *Best performance* while you play.
+- **Game launch**: optionally starts a game from your Steam library.
+- **Automatic restore**: the window closes itself to free memory, and a small background watcher (about 8 MB of RAM) follows the game. When the game exits, the watcher restores the previous power mode, reopens the programs that were closed and shows a summary.
+
+### Cleanup
+
+- **Analysis first**: the app analyzes before anything is touched and shows the size of each category. You check what to clean.
+- **Categories covered**:
+  - Windows temp files, Windows Update downloads, Delivery Optimization, crash dumps and the component store;
+  - caches and logs of Chrome, Edge, VS Code, Steam, Epic, Ubisoft, EA, Riot, Discord, Logitech G HUB and AMD driver installers;
+  - leftovers of uninstalled programs.
+- **Caution group**: categories that can cost you something are tagged and never preselected. Examples are AMD shader caches, folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
+- **Elevation only when needed**: administrator rights are requested only for system items. That means one optional prompt to measure them and one prompt to clean them, and only when a selected category has any.
+- **Running programs block their category**: if Chrome is open, its cache is skipped and you can close it from the app.
+
+### History
+
+A list of the cleanups done, with space freed, and of past Game Mode sessions.
+
+## Safety model
+
+Deleting files is the riskiest thing this app does, so the rules are enforced in code, not only in the catalog:
+
+- **Allowed roots only**:
+  - temp folders, `%LOCALAPPDATA%`, `%APPDATA%` and `%ProgramData%`;
+  - specific Windows folders and Steam libraries.
+- **Program Files** is reachable only for leftovers of programs that are **not installed**, checked against the Windows uninstall registry.
+- **Protected folders are never touched**:
+  - Desktop, Documents, Downloads, Pictures, Videos, Music and OneDrive;
+  - `.ssh` and `.claude`;
+  - WSL disks and Microsoft Store app data;
+  - the app's own folders.
+- **No following links**: junctions and symlinks are never followed.
+- **Age limits**: temporary files must be older than 24 hours.
+- **Files in use** are skipped and counted, never forced.
+- **The elevated helper is the same executable** started with `--admin`:
+  - it only accepts category ids that exist in the built-in catalog;
+  - it only reads and writes files inside the app's exchange folder.
+
+## Requirements
+
+- Windows 11, 64-bit. Windows 10 should work but has not been tested.
+- To build: [Rust](https://rustup.rs) stable. See [Building](#building).
+
+## Building
+
+The project is developed with the GNU toolchain (`x86_64-pc-windows-gnu`). It needs `dlltool.exe` and `as.exe` from [MinGW-w64](https://www.mingw-w64.org/) binutils, for example from MSYS2.
+
+```powershell
+rustup default stable-x86_64-pc-windows-gnu
+.\build.ps1             # release build, installed in %LOCALAPPDATA%\Programs\ModoJogoLimpeza
+.\build.ps1 -Shortcut   # same, plus a desktop shortcut
+.\build.ps1 -Debug      # debug build, not installed
+```
+
+`build.ps1` looks for the binutils in `%USERPROFILE%\.cargo\mingw-as`, or in the folder given with `-Binutils`, and falls back to `PATH`. A plain `cargo build --release` also works when both tools are on `PATH`. The MSVC toolchain has not been tested yet.
+
+### Tests
+
+```powershell
+cargo test                                      # unit tests, including the safety rules
+cargo test print_ -- --ignored --nocapture      # read-only diagnostics of this machine
+```
+
+## Where things live
+
+| What | Where |
+| --- | --- |
+| Program | `%LOCALAPPDATA%\Programs\ModoJogoLimpeza` |
+| Settings, history, current session | `%LOCALAPPDATA%\ModoJogoLimpeza\*.json` |
+| Cleanup catalog | [`categories.json`](categories.json), embedded at build time |
+
+### Catalog format
+
+Each category has an `id`, a `name`, a `description` and a `group` (`system`, `programs`, `leftovers` or `caution`). It can also have:
+
+- `selectedByDefault`;
+- `slow`;
+- `blockedBy`, the processes that must be closed first;
+- `targets`.
+
+A target's `path` accepts environment variables, `%STEAM%` and `*` wildcards. Its `mode` is one of the following:
+
+| Mode | Effect |
+| --- | --- |
+| `contents` | Deletes the files inside the folder (optionally only those older than `ageHours`, skipping `exclude`) and keeps the folder |
+| `folder` / `file` | Removes the folder or file |
+| `inactiveFolders` | Removes subfolders at `depth` with no writes in `ageHours` |
+| `allButNewest` | Keeps only the newest entry (optionally matching `pattern`) |
+| `staleVsCodeExtensions` | Removes extension folders that VS Code no longer references |
+| `steamLeftovers` | Folders in `steamapps\common` without an installed game |
+| `windowsUpdate` | Stops Windows Update, clears its download cache and starts it again |
+| `deliveryOptimization` | Runs `Delete-DeliveryOptimizationCache` |
+| `componentStore` | Runs `DISM /Online /Cleanup-Image /StartComponentCleanup` |
+
+Targets with `"admin": true` run in the elevated helper. Targets with `notInstalled` apply only while none of the listed programs is installed.
+
+## Project layout
+
+```
+src/
+  main.rs        entry point: window, --watcher and --admin modes
+  app.rs         main window and pages
+  theme.rs       colors, fonts and widgets
+  game_mode.rs   status checks, closing programs, activation and restore
+  watcher.rs     background process that ends the session when the game exits
+  cleanup.rs     catalog, safety rules, analysis and removal
+  admin.rs       elevated helper
+  storage.rs     settings, history and session files
+  steam.rs       Steam libraries and installed games
+  system.rs      Win32 wrappers (processes, windows, power, displays, registry, services)
+categories.json  cleanup catalog
+build.ps1        build and install script
+assets/icon.ico  shortcut icon
+```
+
+## Status
+
+This is an early version. The safety rules have unit tests, but the elevated cleanup and the full Game Mode cycle still need testing on more machines. Use it at your own risk.
+
+## Roadmap
+
+Planned:
+
+- [ ] Downloadable releases (prebuilt executables on GitHub Releases)
+- [ ] Dark mode
+- [ ] Multiple languages, starting with English
+- [ ] Support for more CPU and GPU vendors (NVIDIA and Intel shader caches, vendor tools)
+- [ ] Support for more laptop vendors' performance modes (ASUS, MSI, Dell, HP, Acer…)
+- [ ] Deeper cleanup and optimization that stays safe and customizable
+- [ ] More features in general
+
+Ideas:
+
+- [ ] Option to send removed items to the Recycle Bin instead of deleting them
+- [ ] User-defined cleanup rules in a separate file, on top of the built-in catalog
+- [ ] Per-game profiles (which programs to close, power settings)
+- [ ] Game launch from other launchers (Epic, EA app, Battle.net, Xbox app)
+- [ ] Exportable cleanup report
+- [ ] Executable icon and version info embedded as Windows resources
+- [ ] CI with tests and signed builds
+- [ ] Distribution through winget or Scoop
+- [ ] Keyboard navigation and screen reader support
+
+## License
+
+No license has been chosen yet. Until one is added, all rights are reserved.

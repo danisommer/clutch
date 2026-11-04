@@ -1,0 +1,251 @@
+{
+  "categories": [
+    {
+      "id": "temp",
+      "name": "Arquivos temporários",
+      "description": "Arquivos que os programas deixaram na pasta temporária, com mais de um dia.",
+      "group": "system",
+      "targets": [
+        { "path": "%TEMP%", "mode": "contents", "ageHours": 24, "exclude": ["claude"] }
+      ]
+    },
+    {
+      "id": "claude-sessions",
+      "name": "Sessões encerradas do Claude",
+      "description": "Pastas temporárias de conversas do Claude Code que já terminaram.",
+      "group": "system",
+      "targets": [
+        { "path": "%TEMP%\\claude", "mode": "inactiveFolders", "depth": 2, "ageHours": 24 }
+      ]
+    },
+    {
+      "id": "windows-temp",
+      "name": "Temporários do Windows",
+      "description": "Arquivos temporários do próprio sistema, com mais de um dia.",
+      "group": "system",
+      "targets": [
+        { "path": "%WINDIR%\\Temp", "mode": "contents", "ageHours": 24, "admin": true },
+        { "path": "%WINDIR%\\SystemTemp", "mode": "contents", "ageHours": 24, "admin": true }
+      ]
+    },
+    {
+      "id": "windows-update",
+      "name": "Downloads do Windows Update",
+      "description": "Atualizações que já foram baixadas e instaladas.",
+      "group": "system",
+      "targets": [
+        { "path": "%WINDIR%\\SoftwareDistribution\\Download", "mode": "windowsUpdate", "admin": true }
+      ]
+    },
+    {
+      "id": "delivery-optimization",
+      "name": "Otimização de Entrega",
+      "description": "Partes de atualizações que o Windows guarda para compartilhar com outros computadores.",
+      "group": "system",
+      "targets": [
+        { "path": "%WINDIR%\\ServiceProfiles\\NetworkService\\AppData\\Local\\Microsoft\\Windows\\DeliveryOptimization\\Cache", "mode": "deliveryOptimization", "admin": true }
+      ]
+    },
+    {
+      "id": "crash-dumps",
+      "name": "Despejos de travamento",
+      "description": "Cópias de memória e relatórios de falhas antigas. Só servem para investigar travamentos.",
+      "group": "system",
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\CrashDumps", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Microsoft\\Windows\\WER", "mode": "contents" },
+        { "path": "%WINDIR%\\MEMORY.DMP", "mode": "file", "admin": true },
+        { "path": "%WINDIR%\\LiveKernelReports", "mode": "contents", "admin": true },
+        { "path": "%WINDIR%\\Minidump", "mode": "contents", "admin": true },
+        { "path": "%PROGRAMDATA%\\Microsoft\\Windows\\WER\\ReportArchive", "mode": "contents", "admin": true },
+        { "path": "%PROGRAMDATA%\\Microsoft\\Windows\\WER\\ReportQueue", "mode": "contents", "admin": true }
+      ]
+    },
+    {
+      "id": "component-store",
+      "name": "Componentes antigos do Windows",
+      "description": "Versões substituídas de componentes do sistema. Pode levar até 15 minutos.",
+      "group": "system",
+      "selectedByDefault": false,
+      "slow": true,
+      "targets": [
+        { "path": "", "mode": "componentStore", "admin": true }
+      ]
+    },
+    {
+      "id": "vscode",
+      "name": "Visual Studio Code",
+      "description": "Extensões desatualizadas, pacotes de instalação, relatórios de falha e logs antigos.",
+      "group": "programs",
+      "targets": [
+        { "path": "%USERPROFILE%\\.vscode\\extensions", "mode": "staleVsCodeExtensions" },
+        { "path": "%APPDATA%\\Code\\CachedExtensionVSIXs", "mode": "contents" },
+        { "path": "%APPDATA%\\Code\\Crashpad", "mode": "contents" },
+        { "path": "%APPDATA%\\Code\\logs", "mode": "contents", "ageHours": 24 },
+        { "path": "%APPDATA%\\Code\\CachedData", "mode": "allButNewest" }
+      ]
+    },
+    {
+      "id": "chrome",
+      "name": "Google Chrome",
+      "description": "Cache de sites e de componentes. Não desconecta de nenhuma conta.",
+      "group": "programs",
+      "blockedBy": [{ "process": "chrome", "name": "Google Chrome" }],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Code Cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\GPUCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\DawnGraphiteCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\DawnWebGPUCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Service Worker\\CacheStorage", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\ShaderCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\GrShaderCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\GraphiteDawnCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\component_crx_cache", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "edge",
+      "name": "Microsoft Edge",
+      "description": "Cache de sites e de componentes. Não desconecta de nenhuma conta.",
+      "group": "programs",
+      "blockedBy": [{ "process": "msedge", "name": "Microsoft Edge" }],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Code Cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\GPUCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Service Worker\\CacheStorage", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\ShaderCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\GrShaderCache", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "steam",
+      "name": "Steam",
+      "description": "Cache da loja, logs e relatórios de falha.",
+      "group": "programs",
+      "blockedBy": [{ "process": "steam", "name": "Steam" }],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\Steam\\htmlcache", "mode": "contents" },
+        { "path": "%STEAM%\\logs", "mode": "contents" },
+        { "path": "%STEAM%\\dumps", "mode": "contents" },
+        { "path": "%STEAM%\\appcache\\httpcache", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "launchers",
+      "name": "Epic, Ubisoft, EA e Riot",
+      "description": "Cache e logs dos launchers de jogos.",
+      "group": "programs",
+      "blockedBy": [
+        { "process": "EpicGamesLauncher", "name": "Epic Games" },
+        { "process": "upc", "name": "Ubisoft Connect" },
+        { "process": "EADesktop", "name": "EA app" },
+        { "process": "RiotClientServices", "name": "Riot Client" }
+      ],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\EpicGamesLauncher\\Saved\\webcache*", "mode": "folder" },
+        { "path": "%LOCALAPPDATA%\\EpicGamesLauncher\\Saved\\Logs", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Ubisoft Game Launcher\\cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Riot Games\\Riot Client\\Logs", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "description": "Instaladores de versões antigas.",
+      "group": "programs",
+      "blockedBy": [{ "process": "Discord", "name": "Discord" }],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\Discord\\packages", "mode": "allButNewest", "pattern": "*.nupkg" }
+      ]
+    },
+    {
+      "id": "ghub",
+      "name": "Logitech G HUB",
+      "description": "Cache de downloads de atualizações.",
+      "group": "programs",
+      "blockedBy": [{ "process": "lghub", "name": "Logitech G HUB" }],
+      "targets": [
+        { "path": "%PROGRAMDATA%\\LGHUB\\cache", "mode": "contents", "admin": true }
+      ]
+    },
+    {
+      "id": "amd-installers",
+      "name": "Instaladores de driver da AMD",
+      "description": "Arquivos extraídos durante a instalação de drivers de vídeo.",
+      "group": "programs",
+      "targets": [
+        { "path": "%SYSTEMDRIVE%\\AMD", "mode": "contents", "admin": true }
+      ]
+    },
+    {
+      "id": "program-leftovers",
+      "name": "Restos de programas desinstalados",
+      "description": "Pastas que sobraram depois de desinstalar programas.",
+      "group": "leftovers",
+      "targets": [
+        { "path": "%PROGRAMFILES%\\Warp", "mode": "folder", "notInstalled": ["Warp"], "admin": true },
+        { "path": "%LOCALAPPDATA%\\Programs\\Opera GX", "mode": "folder", "notInstalled": ["Opera"] },
+        { "path": "%LOCALAPPDATA%\\Programs\\Opera", "mode": "folder", "notInstalled": ["Opera"] },
+        { "path": "%LOCALAPPDATA%\\moises-desktop-updater", "mode": "folder", "notInstalled": ["Moises"] },
+        { "path": "%LOCALAPPDATA%\\Programs\\moises-desktop", "mode": "folder", "notInstalled": ["Moises"] },
+        { "path": "%APPDATA%\\Wallpaper Engine", "mode": "folder", "notInstalled": ["Wallpaper Engine"] },
+        { "path": "%PROGRAMDATA%\\Piriform", "mode": "folder", "notInstalled": ["CCleaner"], "admin": true },
+        { "path": "%PROGRAMFILES%\\Piriform", "mode": "folder", "notInstalled": ["CCleaner"], "admin": true }
+      ]
+    },
+    {
+      "id": "chrome-ai-model",
+      "name": "Modelo de IA do Chrome",
+      "description": "Modelo que o Chrome usa em recursos de IA locais. Ele é baixado de novo se algum recurso precisar.",
+      "group": "caution",
+      "selectedByDefault": false,
+      "blockedBy": [{ "process": "chrome", "name": "Google Chrome" }],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\OptGuideOnDeviceModel", "mode": "folder" }
+      ]
+    },
+    {
+      "id": "amd-shaders",
+      "name": "Cache de shaders da AMD",
+      "description": "Os jogos recompilam os shaders depois e podem travar nas primeiras partidas.",
+      "group": "caution",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\AMD\\DxCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\AMD\\DxcCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\AMD\\VkCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\AMD\\GLCache", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "steam-leftovers",
+      "name": "Pastas de jogos desinstalados",
+      "description": "Pastas na biblioteca da Steam sem jogo instalado. Podem guardar replays, mods ou projetos seus.",
+      "group": "caution",
+      "selectedByDefault": false,
+      "blockedBy": [{ "process": "steam", "name": "Steam" }],
+      "targets": [
+        { "path": "", "mode": "steamLeftovers" }
+      ]
+    },
+    {
+      "id": "uninstalled-app-data",
+      "name": "Dados de programas desinstalados",
+      "description": "Perfis de navegadores e dados de apps removidos. Podem ter favoritos ou senhas salvas.",
+      "group": "caution",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "%APPDATA%\\Mozilla\\Firefox", "mode": "folder", "notInstalled": ["Firefox"] },
+        { "path": "%LOCALAPPDATA%\\Mozilla\\Firefox", "mode": "folder", "notInstalled": ["Firefox"] },
+        { "path": "%APPDATA%\\Opera Software", "mode": "folder", "notInstalled": ["Opera"] },
+        { "path": "%LOCALAPPDATA%\\Opera Software", "mode": "folder", "notInstalled": ["Opera"] },
+        { "path": "%APPDATA%\\Moises", "mode": "folder", "notInstalled": ["Moises"] },
+        { "path": "%LOCALAPPDATA%\\warp", "mode": "folder", "notInstalled": ["Warp"] },
+        { "path": "%USERPROFILE%\\.warp", "mode": "folder", "notInstalled": ["Warp"] }
+      ]
+    }
+  ]
+}

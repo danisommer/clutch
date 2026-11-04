@@ -1,0 +1,260 @@
+//! Visual identity: colors, typography and hand-drawn widgets in a Swiss-style layout.
+
+use std::sync::Arc;
+
+use eframe::egui::{
+    self, Align2, Color32, CornerRadius, CursorIcon, FontData, FontDefinitions, FontFamily, FontId,
+    Pos2, Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
+};
+
+use crate::game_mode::{Item, Status};
+
+pub const BACKGROUND: Color32 = Color32::from_rgb(244, 243, 239);
+pub const SURFACE: Color32 = Color32::from_rgb(234, 232, 226);
+pub const TEXT: Color32 = Color32::from_rgb(20, 20, 20);
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(112, 110, 104);
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(168, 165, 158);
+pub const RULE: Color32 = Color32::from_rgb(220, 217, 209);
+pub const RED: Color32 = Color32::from_rgb(227, 0, 27);
+pub const RED_DARK: Color32 = Color32::from_rgb(186, 0, 22);
+pub const WHITE: Color32 = Color32::WHITE;
+
+const SEMIBOLD: &str = "semibold";
+const LIGHT: &str = "light";
+
+fn load_font(file: &str) -> Option<Arc<FontData>> {
+    std::fs::read(format!(r"C:\Windows\Fonts\{file}")).ok().map(|b| Arc::new(FontData::from_owned(b)))
+}
+
+/// Loads Segoe UI from Windows and applies the flat, square-cornered style.
+pub fn apply(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::empty();
+    for (name, file) in [("regular", "segoeui.ttf"), (SEMIBOLD, "seguisb.ttf"), (LIGHT, "segoeuil.ttf"), ("mono", "consola.ttf"), ("fallback", "arial.ttf")] {
+        if let Some(data) = load_font(file) {
+            fonts.font_data.insert(name.into(), data);
+        }
+    }
+    let family = |main: &str| vec![main.to_string(), "regular".into(), "fallback".into()];
+    fonts.families.insert(FontFamily::Proportional, family("regular"));
+    fonts.families.insert(FontFamily::Monospace, family("mono"));
+    fonts.families.insert(FontFamily::Name(SEMIBOLD.into()), family(SEMIBOLD));
+    fonts.families.insert(FontFamily::Name(LIGHT.into()), family(LIGHT));
+    ctx.set_fonts(fonts);
+
+    ctx.style_mut(|style| {
+        style.visuals = egui::Visuals::light();
+        style.visuals.panel_fill = BACKGROUND;
+        style.visuals.window_fill = BACKGROUND;
+        style.visuals.extreme_bg_color = BACKGROUND;
+        style.visuals.override_text_color = Some(TEXT);
+        style.visuals.selection.bg_fill = RED;
+        for w in [&mut style.visuals.widgets.noninteractive, &mut style.visuals.widgets.inactive, &mut style.visuals.widgets.hovered, &mut style.visuals.widgets.active] {
+            w.corner_radius = CornerRadius::ZERO;
+            w.bg_stroke = Stroke::NONE;
+        }
+        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        style.spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
+        style.visuals.widgets.inactive.bg_fill = RULE;
+        style.visuals.widgets.hovered.bg_fill = TEXT_FAINT;
+        style.visuals.widgets.active.bg_fill = TEXT_MUTED;
+    });
+}
+
+pub fn stroke(width: f32, color: Color32) -> Stroke {
+    Stroke { width, color }
+}
+
+pub fn regular(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Proportional)
+}
+
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
+}
+
+pub fn light(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(LIGHT.into()))
+}
+
+pub fn text(content: impl Into<String>, font: FontId, color: Color32) -> RichText {
+    RichText::new(content).font(font).color(color)
+}
+
+pub fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
+    ui.label(text(title, semibold(40.0), TEXT));
+    ui.add_space(2.0);
+    ui.label(text(subtitle, regular(15.0), TEXT_MUTED));
+    ui.add_space(28.0);
+}
+
+pub fn section_label(ui: &mut Ui, label: &str) {
+    ui.label(text(label.to_uppercase(), semibold(11.0), TEXT_MUTED).extra_letter_spacing(1.4));
+    ui.add_space(6.0);
+}
+
+/// Full-width 1 px horizontal rule.
+pub fn rule(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, RULE);
+}
+
+fn button(ui: &mut Ui, label: &str, width: f32, enabled: bool, primary: bool) -> Response {
+    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 46.0), sense);
+    let hovered = enabled && response.hovered();
+    let (fill, outline, text_color) = match (primary, enabled, hovered) {
+        (_, false, _) => (SURFACE, Stroke::NONE, TEXT_FAINT),
+        (true, true, false) => (RED, Stroke::NONE, WHITE),
+        (true, true, true) => (RED_DARK, Stroke::NONE, WHITE),
+        (false, true, false) => (Color32::TRANSPARENT, stroke(1.5, TEXT), TEXT),
+        (false, true, true) => (SURFACE, stroke(1.5, TEXT), TEXT),
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::ZERO, fill);
+    if outline != Stroke::NONE {
+        painter.rect_stroke(rect, CornerRadius::ZERO, outline, StrokeKind::Inside);
+    }
+    painter.text(rect.center(), Align2::CENTER_CENTER, label, semibold(15.0), text_color);
+    if enabled { response.on_hover_cursor(CursorIcon::PointingHand) } else { response }
+}
+
+pub fn primary_button(ui: &mut Ui, label: &str, width: f32, enabled: bool) -> Response {
+    button(ui, label, width, enabled, true)
+}
+
+pub fn secondary_button(ui: &mut Ui, label: &str, width: f32) -> Response {
+    button(ui, label, width, true, false)
+}
+
+pub fn link(ui: &mut Ui, label: &str, color: Color32) -> Response {
+    let response = ui.add(egui::Label::new(text(label, semibold(13.0), color)).sense(Sense::CLICK));
+    if response.hovered() {
+        let r = response.rect;
+        ui.painter().line_segment([Pos2::new(r.left(), r.bottom()), Pos2::new(r.right(), r.bottom())], stroke(1.0, color));
+    }
+    response.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+fn draw_box(ui: &Ui, rect: Rect, checked: bool, enabled: bool, radio: bool) {
+    let square = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
+    let painter = ui.painter();
+    let border = if enabled { TEXT } else { TEXT_FAINT };
+    let fill = if enabled { RED } else { TEXT_FAINT };
+    match (checked, radio) {
+        (false, _) => {
+            painter.rect_stroke(square, CornerRadius::ZERO, stroke(1.5, border), StrokeKind::Inside);
+        }
+        (true, false) => {
+            painter.rect_filled(square, CornerRadius::ZERO, fill);
+            let c = square.center();
+            painter.add(Shape::line(
+                vec![Pos2::new(c.x - 4.5, c.y + 0.5), Pos2::new(c.x - 1.2, c.y + 3.8), Pos2::new(c.x + 4.8, c.y - 3.6)],
+                stroke(2.0, WHITE),
+            ));
+        }
+        (true, true) => {
+            painter.rect_stroke(square, CornerRadius::ZERO, stroke(1.5, border), StrokeKind::Inside);
+            painter.rect_filled(square.shrink(5.0), CornerRadius::ZERO, fill);
+        }
+    }
+}
+
+fn choice(ui: &mut Ui, checked: bool, label: &str, enabled: bool, radio: bool) -> Response {
+    let font = regular(14.5);
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), TEXT);
+    let width = 18.0 + 12.0 + galley.size().x;
+    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), sense);
+    draw_box(ui, Rect::from_min_size(rect.min, Vec2::new(18.0, rect.height())), checked, enabled, radio);
+    let color = if enabled { TEXT } else { TEXT_FAINT };
+    ui.painter().text(Pos2::new(rect.left() + 30.0, rect.center().y), Align2::LEFT_CENTER, label, font, color);
+    if enabled { response.on_hover_cursor(CursorIcon::PointingHand) } else { response }
+}
+
+/// Square checkbox; the returned response is already marked as changed when clicked.
+pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str, enabled: bool) -> Response {
+    let mut response = choice(ui, *checked, label, enabled, false);
+    if response.clicked() {
+        *checked = !*checked;
+        response.mark_changed();
+    }
+    response
+}
+
+pub fn radio(ui: &mut Ui, selected: bool, label: &str) -> Response {
+    choice(ui, selected, label, true, true)
+}
+
+/// Checkbox square without a label, for rows with their own layout.
+pub fn bare_checkbox(ui: &mut Ui, checked: &mut bool, enabled: bool) -> Response {
+    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
+    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(18.0, 22.0), sense);
+    draw_box(ui, rect, *checked, enabled, false);
+    if response.clicked() {
+        *checked = !*checked;
+        response.mark_changed();
+    }
+    if enabled { response.on_hover_cursor(CursorIcon::PointingHand) } else { response }
+}
+
+/// Small outlined uppercase tag, such as "ADMIN".
+pub fn tag(ui: &mut Ui, label: &str, color: Color32) {
+    let font = semibold(9.5);
+    let galley = ui.painter().layout_no_wrap(label.to_uppercase(), font.clone(), color);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(galley.size().x + 10.0, 17.0), Sense::hover());
+    ui.painter().rect_stroke(rect, CornerRadius::ZERO, stroke(1.0, color), StrokeKind::Inside);
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label.to_uppercase(), font, color);
+}
+
+pub fn status_color(status: Status) -> Color32 {
+    match status {
+        Status::Ok => TEXT,
+        Status::Warning => RED,
+        Status::Neutral => TEXT_MUTED,
+    }
+}
+
+/// Left-aligned text in a fixed-width column.
+pub fn column(ui: &mut Ui, width: f32, content: RichText) {
+    ui.allocate_ui_with_layout(Vec2::new(width, 20.0), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        ui.set_min_width(width);
+        ui.add(egui::Label::new(content).truncate());
+    });
+}
+
+/// "Label — value" row, with the hint right below the value when there is one.
+pub fn item_row(ui: &mut Ui, item: &Item, label_width: f32) {
+    ui.add_space(9.0);
+    ui.horizontal_top(|ui| {
+        column(ui, label_width, text(&item.label, regular(14.0), TEXT_MUTED));
+        ui.vertical(|ui| {
+            ui.add(egui::Label::new(text(&item.value, semibold(14.0), status_color(item.status))).wrap());
+            if let Some(hint) = &item.hint {
+                ui.add(egui::Label::new(text(format!("→ {hint}"), regular(12.5), TEXT_MUTED)).wrap());
+            }
+        });
+    });
+    ui.add_space(9.0);
+    rule(ui);
+}
+
+pub fn loading(ui: &mut Ui, message: &str) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Spinner::new().size(16.0).color(TEXT));
+        ui.label(text(message, regular(14.0), TEXT_MUTED));
+    });
+}
+
+/// 32×32 window icon: a red square with a white bar.
+pub fn icon() -> egui::IconData {
+    let side = 32u32;
+    let mut rgba = Vec::with_capacity((side * side * 4) as usize);
+    for y in 0..side {
+        for x in 0..side {
+            let bar = (8..=23).contains(&x) && (14..=17).contains(&y);
+            let (r, g, b) = if bar { (255, 255, 255) } else { (227, 0, 27) };
+            rgba.extend_from_slice(&[r, g, b, 255]);
+        }
+    }
+    egui::IconData { rgba, width: side, height: side }
+}
