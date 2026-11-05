@@ -41,6 +41,14 @@ pub enum ThemeChoice {
     Dark,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LanguageChoice {
+    #[default]
+    System,
+    PortugueseBrazil,
+    English,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -50,6 +58,7 @@ pub struct Config {
     pub best_performance: bool,
     pub reopen_on_exit: bool,
     pub theme: ThemeChoice,
+    pub language: LanguageChoice,
 }
 
 impl Default for Config {
@@ -72,6 +81,7 @@ impl Default for Config {
             best_performance: true,
             reopen_on_exit: true,
             theme: ThemeChoice::System,
+            language: LanguageChoice::System,
         }
     }
 }
@@ -82,21 +92,39 @@ pub enum HistoryKind {
     Cleanup,
 }
 
-impl HistoryKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            HistoryKind::GameMode => "Modo Jogo",
-            HistoryKind::Cleanup => "Limpeza",
-        }
-    }
+/// Local date and time, kept as numbers so it can be shown in any language.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Stamp {
+    pub year: u16,
+    pub month: u16,
+    pub day: u16,
+    pub hour: u16,
+    pub minute: u16,
+}
+
+/// Entries written before translation keep their date as Portuguese text.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum HistoryDate {
+    Local(Stamp),
+    Legacy(String),
+}
+
+/// What an entry was about; entries written before translation keep a Portuguese sentence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Summary {
+    Cleanup { categories: usize },
+    GameMode { game: Option<String>, seconds: u64 },
+    Legacy(String),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HistoryEntry {
-    pub date: String,
+    pub date: HistoryDate,
     pub kind: HistoryKind,
     pub freed: u64,
-    pub summary: String,
+    pub summary: Summary,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -160,9 +188,9 @@ pub fn load_history() -> Vec<HistoryEntry> {
 }
 
 /// Prepends an entry and keeps only the most recent ones.
-pub fn add_history(kind: HistoryKind, freed: u64, summary: String) {
+pub fn add_history(kind: HistoryKind, freed: u64, summary: Summary) {
     let mut history = load_history();
-    history.insert(0, HistoryEntry { date: now_local(), kind, freed, summary });
+    history.insert(0, HistoryEntry { date: HistoryDate::Local(now_local()), kind, freed, summary });
     history.truncate(HISTORY_LIMIT);
     let _ = write_json("history.json", &history);
 }
@@ -209,22 +237,9 @@ pub fn now_epoch() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-pub fn now_local() -> String {
+pub fn now_local() -> Stamp {
     let t = system::local_time();
-    format!("{:02}/{:02}/{} {:02}:{:02}", t.wDay, t.wMonth, t.wYear, t.wHour, t.wMinute)
-}
-
-/// Human-readable size with a decimal comma: "6,4 GB", "820 MB", "12 KB".
-pub fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    let b = bytes as f64;
-    let (value, unit, decimals) = match b {
-        _ if b >= KB * KB * KB => (b / (KB * KB * KB), "GB", 1),
-        _ if b >= KB * KB => (b / (KB * KB), "MB", 0),
-        _ if b >= KB => (b / KB, "KB", 0),
-        _ => (b, "B", 0),
-    };
-    format!("{value:.decimals$} {unit}").replace('.', ",")
+    Stamp { year: t.wYear, month: t.wMonth, day: t.wDay, hour: t.wHour, minute: t.wMinute }
 }
 
 pub fn format_duration(seconds: u64) -> String {
@@ -234,14 +249,6 @@ pub fn format_duration(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn formats_sizes_with_decimal_comma() {
-        assert_eq!(format_size(0), "0 B");
-        assert_eq!(format_size(1536), "2 KB");
-        assert_eq!(format_size(820 * 1024 * 1024), "820 MB");
-        assert_eq!(format_size(6_871_947_674), "6,4 GB");
-    }
 
     #[test]
     fn formats_duration() {

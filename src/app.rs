@@ -1,4 +1,4 @@
-//! Main window: navigation, Game Mode, Cleanup and History pages.
+//! Main window: navigation, Game Mode, Cleanup, History and Settings pages.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -13,10 +13,13 @@ use eframe::egui::{
     Sense, StrokeKind, Ui, Vec2, ViewportCommand,
 };
 
-use crate::admin::{self, AdminError};
+use crate::admin;
 use crate::cleanup::{self, Analysis, Catalog, Category, CleanupResult, Group};
 use crate::game_mode::{self, Item, Status};
-use crate::storage::{self, ChosenGame, Config, Force, HistoryEntry, HistoryKind, ProgramConfig, Session, ThemeChoice};
+use crate::i18n::{self, Texts};
+use crate::storage::{
+    self, ChosenGame, Config, Force, HistoryEntry, HistoryKind, LanguageChoice, ProgramConfig, Session, Summary, ThemeChoice,
+};
 use crate::theme::{self, *};
 use crate::{steam, system, watcher};
 
@@ -24,6 +27,8 @@ const NAV_WIDTH: f32 = 252.0;
 const TITLE_BAR_HEIGHT: f32 = 40.0;
 const AUTO_CLOSE_DELAY: Duration = Duration::from_secs(10);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
+const BRAND_FIRST_LINE: &str = "Modo Jogo";
+const BRAND_SECOND_LINE: &str = "e Limpeza";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -88,6 +93,7 @@ enum CleanupAction {
 pub struct App {
     page: Page,
     config: Config,
+    t: &'static Texts,
     catalog: Catalog,
     tx: Sender<Message>,
     rx: Receiver<Message>,
@@ -123,6 +129,7 @@ impl App {
         let session = storage::load_session();
         let mut app = App {
             page: Page::GameMode,
+            t: i18n::texts_for(config.language),
             config,
             catalog: cleanup::catalog(),
             tx,
@@ -180,8 +187,9 @@ impl App {
     fn refresh_overview(&mut self, ctx: &egui::Context) {
         self.loading_overview = true;
         let config = self.config.clone();
+        let t = self.t;
         self.spawn_task(ctx, move |tx, _| {
-            let items = game_mode::overview(&config);
+            let items = game_mode::overview(&config, t);
             let games = steam::games();
             let _ = tx.send(Message::Overview { items, games });
         });
@@ -231,15 +239,16 @@ impl App {
 
     fn activate(&mut self, ctx: &egui::Context) {
         self.game_phase = GamePhase::Activating;
-        self.game_progress = "Preparando".into();
+        self.game_progress = self.t.step_preparing.into();
         let config = self.config.clone();
+        let t = self.t;
         let game = config.game.as_ref().and_then(|g| self.games.iter().find(|m| m.app_id == g.app_id).cloned());
         self.spawn_task(ctx, move |tx, ctx| {
             let progress = |step: &str| {
                 let _ = tx.send(Message::GameProgress(step.into()));
                 ctx.request_repaint();
             };
-            let activation = game_mode::activate(&config, game.as_ref(), &progress);
+            let activation = game_mode::activate(&config, game.as_ref(), t, &progress);
             let _ = tx.send(Message::Activated(activation));
         });
     }
@@ -249,9 +258,10 @@ impl App {
         self.close_at = None;
         self.game_phase = GamePhase::Deactivating;
         let reopen = self.config.reopen_on_exit;
+        let t = self.t;
         self.spawn_task(ctx, move |tx, _| {
             let items = match storage::claim_session() {
-                Some(session) => game_mode::deactivate(&session, reopen),
+                Some(session) => game_mode::deactivate(&session, reopen, t),
                 None => wait_for_watcher_summary(),
             };
             let _ = tx.send(Message::Deactivated(items));
@@ -261,22 +271,21 @@ impl App {
     fn analyze(&mut self, ctx: &egui::Context) {
         self.cleanup_phase = CleanupPhase::Analyzing;
         self.cleanup_warning = None;
-        self.spawn_task(ctx, |tx, ctx| {
+        let t = self.t;
+        self.spawn_task(ctx, move |tx, ctx| {
             let progress = |name: &str| {
                 let _ = tx.send(Message::CleanupProgress(name.into()));
                 ctx.request_repaint();
             };
-            let _ = tx.send(Message::Analyzed(cleanup::analyze(&progress)));
+            let _ = tx.send(Message::Analyzed(cleanup::analyze(t, &progress)));
         });
     }
 
     fn measure_system(&mut self, ctx: &egui::Context) {
         self.cleanup_phase = CleanupPhase::MeasuringSystem;
-        self.spawn_task(ctx, |tx, _| {
-            let result = admin::measure_system().map_err(|error| match error {
-                AdminError::Cancelled => "Permissão negada: os itens do sistema não foram medidos.".to_string(),
-                AdminError::Failed(e) => e,
-            });
+        let t = self.t;
+        self.spawn_task(ctx, move |tx, _| {
+            let result = admin::measure_system().map_err(|error| t.admin_error(error, t.permission_denied_measure));
             let _ = tx.send(Message::SystemMeasured(result));
         });
     }
@@ -285,6 +294,7 @@ impl App {
     fn clean(&mut self, ctx: &egui::Context) {
         self.cleanup_phase = CleanupPhase::Cleaning;
         self.cleanup_warning = None;
+        let t = self.t;
         let selected: Vec<&Category> = self.catalog.categories.iter().filter(|c| self.selection.contains(&c.id)).collect();
         let ids: Vec<String> = selected.iter().map(|c| c.id.clone()).collect();
         let admin_ids: Vec<String> = selected.iter().filter(|c| c.targets.iter().any(|t| t.admin)).map(|c| c.id.clone()).collect();
@@ -293,11 +303,11 @@ impl App {
                 let _ = tx.send(Message::CleanupProgress(name.into()));
                 ctx.request_repaint();
             };
-            let mut by_id: HashMap<String, CleanupResult> = cleanup::clean(&ids, false, &progress).into_iter().map(|r| (r.id.clone(), r)).collect();
+            let mut by_id: HashMap<String, CleanupResult> = cleanup::clean(&ids, false, t, &progress).into_iter().map(|r| (r.id.clone(), r)).collect();
             let mut warning = None;
             if !admin_ids.is_empty() {
-                progress("itens do sistema (aguardando permissão)");
-                match admin::clean_system(&admin_ids) {
+                progress(t.system_items_waiting);
+                match admin::clean_system(&admin_ids, t.language) {
                     Ok(admin_results) => {
                         for r in admin_results {
                             let entry = by_id.entry(r.id.clone()).or_insert_with(|| CleanupResult { id: r.id.clone(), ..Default::default() });
@@ -307,17 +317,12 @@ impl App {
                             }
                         }
                     }
-                    Err(AdminError::Cancelled) => warning = Some("Permissão negada: os itens do sistema não foram limpos.".to_string()),
-                    Err(AdminError::Failed(e)) => warning = Some(e),
+                    Err(error) => warning = Some(t.admin_error(error, t.permission_denied_clean)),
                 }
             }
             let results: Vec<CleanupResult> = ids.iter().filter_map(|id| by_id.remove(id)).collect();
             let freed: u64 = results.iter().map(|r| r.tally.bytes).sum();
-            let summary = match results.len() {
-                1 => "1 categoria".to_string(),
-                n => format!("{n} categorias"),
-            };
-            storage::add_history(HistoryKind::Cleanup, freed, summary);
+            storage::add_history(HistoryKind::Cleanup, freed, Summary::Cleanup { categories: results.len() });
             let _ = tx.send(Message::Cleaned { results, warning });
         });
     }
@@ -340,9 +345,10 @@ impl App {
             })
             .collect();
         self.cleanup_phase = CleanupPhase::Analyzing;
-        self.cleanup_progress = "programas abertos".into();
+        self.cleanup_progress = self.t.open_programs.into();
+        let t = self.t;
         self.spawn_task(ctx, move |tx, _| {
-            let items = game_mode::close_programs(&programs).iter().map(|r| r.item()).collect();
+            let items = game_mode::close_programs(&programs).iter().map(|r| r.item(t)).collect();
             let _ = tx.send(Message::BlockersClosed(items));
         });
     }
@@ -457,14 +463,16 @@ impl App {
 
     fn navigation(&mut self, ui: &mut Ui) {
         let pal = palette(ui.ctx());
+        let t = self.t;
         ui.add_space(14.0);
-        ui.label(text("Modo Jogo", semibold(24.0), pal.text));
-        ui.label(text("e Limpeza", semibold(24.0), pal.text_faint));
+        ui.label(text(BRAND_FIRST_LINE, semibold(24.0), pal.text));
+        ui.label(text(BRAND_SECOND_LINE, semibold(24.0), pal.text_faint));
         ui.add_space(16.0);
         let (bar, _) = ui.allocate_exact_size(Vec2::new(28.0, 4.0), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, pal.accent);
         ui.add_space(48.0);
-        for (number, page, name) in [(1, Page::GameMode, "Modo Jogo"), (2, Page::Cleanup, "Limpeza"), (3, Page::History, "Histórico"), (4, Page::Settings, "Configurações")] {
+        let pages = [(1, Page::GameMode, t.game_mode), (2, Page::Cleanup, t.cleanup), (3, Page::History, t.history), (4, Page::Settings, t.settings)];
+        for (number, page, name) in pages {
             if nav_item(ui, number, name, self.page == page).clicked() {
                 self.page = page;
                 if page == Page::History {
@@ -476,24 +484,25 @@ impl App {
             ui.label(text(format!("v{}", env!("CARGO_PKG_VERSION")), regular(11.0), pal.text_faint));
             ui.add_space(14.0);
             if let Some(free) = self.free_space_c {
-                ui.label(text(format!("{} livres", storage::format_size(free)), semibold(18.0), pal.text));
-                ui.label(text("DISCO C:", semibold(10.5), pal.text_muted).extra_letter_spacing(1.4));
+                ui.label(text(t.free_space(&t.size(free)), semibold(18.0), pal.text));
+                ui.label(text(t.drive_c, semibold(10.5), pal.text_muted).extra_letter_spacing(1.4));
             }
         });
     }
 
     fn game_mode_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = self.t;
         let action = match self.game_phase {
             GamePhase::Ready => self.game_ready(ui),
             GamePhase::Activating => {
-                heading(ui, "Modo Jogo", "Preparando o computador.");
+                heading(ui, t.game_mode, t.preparing_subtitle);
                 loading(ui, &format!("{}…", self.game_progress));
                 None
             }
             GamePhase::Active => self.game_active(ui),
             GamePhase::Deactivating => {
-                heading(ui, "Modo Jogo", "Restaurando o computador.");
-                loading(ui, "Reabrindo programas…");
+                heading(ui, t.game_mode, t.restoring_subtitle);
+                loading(ui, t.reopening_programs);
                 None
             }
             GamePhase::Finished => self.game_finished(ui),
@@ -526,7 +535,8 @@ impl App {
 
     fn game_ready(&mut self, ui: &mut Ui) -> Option<GameAction> {
         let pal = palette(ui.ctx());
-        heading(ui, "Modo Jogo", "Fecha programas pesados, desliga a WSL e ajusta a energia para jogar.");
+        let t = self.t;
+        heading(ui, t.game_mode, t.game_mode_subtitle);
         let mut action = None;
         let width = ui.available_width();
         let left = (width * 0.55).floor();
@@ -537,9 +547,9 @@ impl App {
             ui.vertical(|ui| {
                 ui.set_width(left);
                 ui.horizontal(|ui| {
-                    section_label(ui, "Estado");
+                    section_label(ui, t.status_section);
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        if link(ui, "Atualizar", pal.text_muted).clicked() {
+                        if link(ui, t.refresh, pal.text_muted).clicked() {
                             action = Some(GameAction::Refresh);
                         }
                     });
@@ -550,7 +560,7 @@ impl App {
                     match (self.loading_overview, self.overview_items.is_empty()) {
                         (true, true) => {
                             ui.add_space(12.0);
-                            loading(ui, "Verificando…");
+                            loading(ui, t.checking);
                         }
                         _ => {
                             for item in &self.overview_items {
@@ -565,7 +575,7 @@ impl App {
                 ui.set_width(right);
                 egui::ScrollArea::vertical().id_salt("options").max_height(height + 26.0).show(ui, |ui| {
                     ui.set_width(right - 14.0);
-                    section_label(ui, "Fechar programas");
+                    section_label(ui, t.close_programs_section);
                     rule(ui);
                     ui.add_space(8.0);
                     let mut remove = None;
@@ -573,7 +583,7 @@ impl App {
                         ui.horizontal(|ui| {
                             changed |= checkbox(ui, &mut program.enabled, &program.name, true).changed();
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if link(ui, "Remover", pal.text_faint).clicked() {
+                                if link(ui, t.remove, pal.text_faint).clicked() {
                                     remove = Some(index);
                                 }
                             });
@@ -585,15 +595,15 @@ impl App {
                     ui.add_space(4.0);
                     match &self.candidates {
                         None => {
-                            if link(ui, "+ Adicionar programa aberto", pal.accent_text).clicked() {
+                            if link(ui, t.add_open_program, pal.accent_text).clicked() {
                                 action = Some(GameAction::FindCandidates);
                             }
                         }
                         Some(list) if list.is_empty() => {
-                            ui.label(text("Nenhum outro programa com janela aberta.", regular(13.0), pal.text_muted));
+                            ui.label(text(t.no_other_windows, regular(13.0), pal.text_muted));
                         }
                         Some(list) => {
-                            ui.label(text("Escolha o programa:", regular(13.0), pal.text_muted));
+                            ui.label(text(t.choose_program, regular(13.0), pal.text_muted));
                             for (process, window_title) in list {
                                 let label = format!("+ {process}  ·  {}", shorten(window_title, 34));
                                 if link(ui, &label, pal.accent_text).clicked() {
@@ -603,17 +613,17 @@ impl App {
                         }
                     }
                     ui.add_space(22.0);
-                    section_label(ui, "Sistema");
+                    section_label(ui, t.system_section);
                     rule(ui);
                     ui.add_space(8.0);
-                    changed |= checkbox(ui, &mut self.config.shutdown_wsl, "Desligar a WSL", true).changed();
-                    changed |= checkbox(ui, &mut self.config.best_performance, "Ativar Melhor desempenho", true).changed();
-                    changed |= checkbox(ui, &mut self.config.reopen_on_exit, "Reabrir programas ao sair do jogo", true).changed();
+                    changed |= checkbox(ui, &mut self.config.shutdown_wsl, t.shutdown_wsl, true).changed();
+                    changed |= checkbox(ui, &mut self.config.best_performance, t.best_performance, true).changed();
+                    changed |= checkbox(ui, &mut self.config.reopen_on_exit, t.reopen_on_exit, true).changed();
                     ui.add_space(22.0);
-                    section_label(ui, "Abrir jogo");
+                    section_label(ui, t.launch_game_section);
                     rule(ui);
                     ui.add_space(8.0);
-                    if radio(ui, self.config.game.is_none(), "Nenhum").clicked() {
+                    if radio(ui, self.config.game.is_none(), t.no_game).clicked() {
                         self.config.game = None;
                         changed = true;
                     }
@@ -631,7 +641,7 @@ impl App {
             self.save_config();
         }
         ui.add_space(24.0);
-        if primary_button(ui, "Ativar Modo Jogo", 240.0, !self.loading_overview).clicked() {
+        if primary_button(ui, t.activate, 240.0, !self.loading_overview).clicked() {
             action = Some(GameAction::Activate);
         }
         action
@@ -639,45 +649,46 @@ impl App {
 
     fn game_active(&mut self, ui: &mut Ui) -> Option<GameAction> {
         let pal = palette(ui.ctx());
+        let t = self.t;
         let mut action = None;
         let Some(session) = &self.session else { return Some(GameAction::Back) };
-        ui.label(text("Modo Jogo", semibold(40.0), pal.text));
+        ui.label(text(t.game_mode, semibold(40.0), pal.text));
         ui.add_space(4.0);
-        tag(ui, "Ativo", pal.accent_text);
+        tag(ui, t.active_tag, pal.accent_text);
         ui.add_space(26.0);
         let elapsed = storage::now_epoch().saturating_sub(session.started_at);
         ui.label(text(storage::format_duration(elapsed), light(72.0), pal.text));
         let status_line = match (&session.game, self.game_running) {
-            (Some(g), true) => format!("{} em execução. O Modo Jogo encerra sozinho quando o jogo fechar.", g.name),
-            (Some(g), false) => format!("Aguardando {} abrir.", g.name),
-            (None, _) => "Nenhum jogo escolhido. Encerre quando terminar de jogar.".to_string(),
+            (Some(g), true) => t.game_running(&g.name),
+            (Some(g), false) => t.waiting_for_game(&g.name),
+            (None, _) => t.no_game_chosen.to_string(),
         };
         ui.label(text(status_line, regular(15.0), pal.text_muted));
         if let Some(deadline) = self.close_at {
             let remaining = deadline.saturating_duration_since(Instant::now()).as_secs() + 1;
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label(text(format!("Esta janela fecha em {remaining} s para liberar memória. O Modo Jogo continua ativo."), regular(13.0), pal.text_muted));
-                if link(ui, "Manter aberta", pal.accent_text).clicked() {
+                ui.label(text(t.window_closes_in(remaining), regular(13.0), pal.text_muted));
+                if link(ui, t.keep_open, pal.accent_text).clicked() {
                     action = Some(GameAction::KeepOpen);
                 }
             });
         }
         ui.add_space(28.0);
         let height = ui.available_height() - 90.0;
-        section_label(ui, "O que foi feito");
+        section_label(ui, t.what_was_done);
         rule(ui);
         egui::ScrollArea::vertical().id_salt("activation").max_height(height).show(ui, |ui| {
             if self.activation_items.is_empty() {
                 ui.add_space(10.0);
-                ui.label(text("Sessão retomada depois que o app foi reaberto.", regular(14.0), pal.text_muted));
+                ui.label(text(t.session_resumed, regular(14.0), pal.text_muted));
             }
             for item in &self.activation_items {
                 item_row(ui, item, 196.0);
             }
         });
         ui.add_space(20.0);
-        if secondary_button(ui, "Encerrar Modo Jogo", 240.0).clicked() {
+        if secondary_button(ui, t.deactivate, 240.0).clicked() {
             action = Some(GameAction::Deactivate);
         }
         action
@@ -685,40 +696,42 @@ impl App {
 
     fn game_finished(&mut self, ui: &mut Ui) -> Option<GameAction> {
         let pal = palette(ui.ctx());
-        heading(ui, "Modo Jogo", "Encerrado. O computador voltou ao normal.");
-        section_label(ui, "Ao encerrar");
+        let t = self.t;
+        heading(ui, t.game_mode, t.finished_subtitle);
+        section_label(ui, t.on_exit_section);
         rule(ui);
         if self.deactivation_items.is_empty() {
             ui.add_space(10.0);
-            ui.label(text("Nada precisou ser restaurado.", regular(14.0), pal.text_muted));
+            ui.label(text(t.nothing_restored, regular(14.0), pal.text_muted));
             ui.add_space(10.0);
         }
         for item in &self.deactivation_items {
             item_row(ui, item, 196.0);
         }
         ui.add_space(24.0);
-        primary_button(ui, "Voltar", 200.0, true).clicked().then_some(GameAction::Back)
+        primary_button(ui, t.back, 200.0, true).clicked().then_some(GameAction::Back)
     }
 
     fn cleanup_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let pal = palette(ui.ctx());
-        heading(ui, "Limpeza", "Analise o que pode ser removido e marque o que limpar. Nada é apagado sem você confirmar.");
+        let t = self.t;
+        heading(ui, t.cleanup, t.cleanup_subtitle);
         let action = match self.cleanup_phase {
             CleanupPhase::Idle => {
-                ui.label(text("Arquivos temporários, caches de programas e restos de instalações.", regular(14.0), pal.text_muted));
+                ui.label(text(t.cleanup_intro, regular(14.0), pal.text_muted));
                 ui.add_space(20.0);
-                primary_button(ui, "Analisar", 200.0, true).clicked().then_some(CleanupAction::Analyze)
+                primary_button(ui, t.analyze, 200.0, true).clicked().then_some(CleanupAction::Analyze)
             }
             CleanupPhase::Analyzing => {
-                loading(ui, &format!("Analisando {}…", self.cleanup_progress.to_lowercase()));
+                loading(ui, &t.analyzing(&self.cleanup_progress.to_lowercase()));
                 None
             }
             CleanupPhase::MeasuringSystem => {
-                loading(ui, "Aguardando a permissão de administrador…");
+                loading(ui, t.waiting_for_admin);
                 None
             }
             CleanupPhase::Cleaning => {
-                loading(ui, &format!("Limpando {}…", self.cleanup_progress.to_lowercase()));
+                loading(ui, &t.cleaning(&self.cleanup_progress.to_lowercase()));
                 None
             }
             CleanupPhase::Analyzed => self.cleanup_list(ui),
@@ -738,21 +751,22 @@ impl App {
 
     fn cleanup_list(&mut self, ui: &mut Ui) -> Option<CleanupAction> {
         let pal = palette(ui.ctx());
+        let t = self.t;
         let mut action = None;
         let found: u64 = self.analyses.iter().map(Analysis::total).sum();
         let admin_pending = self.analyses.iter().any(Analysis::admin_pending);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                section_label(ui, "Encontrado");
-                ui.label(text(storage::format_size(found), light(44.0), pal.text));
+                section_label(ui, t.found);
+                ui.label(text(t.size(found), light(44.0), pal.text));
             });
             ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-                if link(ui, "Analisar de novo", pal.text_muted).clicked() {
+                if link(ui, t.analyze_again, pal.text_muted).clicked() {
                     action = Some(CleanupAction::Analyze);
                 }
                 if admin_pending {
                     ui.add_space(16.0);
-                    if link(ui, "Medir itens do sistema", pal.accent_text).on_hover_text("Pede permissão de administrador").clicked() {
+                    if link(ui, t.measure_system, pal.accent_text).on_hover_text(t.asks_for_admin).clicked() {
                         action = Some(CleanupAction::MeasureSystem);
                     }
                 }
@@ -779,11 +793,11 @@ impl App {
                 if categories.is_empty() {
                     continue;
                 }
-                section_label(ui, group.label());
+                section_label(ui, t.group(group));
                 rule(ui);
                 for category in categories {
                     let Some(analysis) = self.analyses.iter().find(|a| a.id == category.id) else { continue };
-                    if let Some(a) = category_row(ui, category, analysis, &mut self.selection) {
+                    if let Some(a) = category_row(ui, t, category, analysis, &mut self.selection) {
                         action = Some(a);
                     }
                 }
@@ -796,12 +810,12 @@ impl App {
         let selected_has_unknown = self.analyses.iter().any(|a| self.selection.contains(&a.id) && (a.unknown_size || a.admin_pending()));
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                section_label(ui, "Selecionado");
-                let extra = if selected_has_unknown { " + sistema" } else { "" };
-                ui.label(text(format!("{}{extra}", storage::format_size(selected)), semibold(24.0), pal.text));
+                section_label(ui, t.selected);
+                let extra = if selected_has_unknown { t.plus_system } else { "" };
+                ui.label(text(format!("{}{extra}", t.size(selected)), semibold(24.0), pal.text));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, "Limpar selecionados", 240.0, !self.selection.is_empty()).clicked() {
+                if primary_button(ui, t.clean_selected, 240.0, !self.selection.is_empty()).clicked() {
                     action = Some(CleanupAction::Clean);
                 }
             });
@@ -811,9 +825,10 @@ impl App {
 
     fn cleanup_results(&mut self, ui: &mut Ui) -> Option<CleanupAction> {
         let pal = palette(ui.ctx());
+        let t = self.t;
         let freed: u64 = self.results.iter().map(|r| r.tally.bytes).sum();
-        section_label(ui, "Liberado");
-        ui.label(text(storage::format_size(freed), light(72.0), pal.text));
+        section_label(ui, t.freed);
+        ui.label(text(t.size(freed), light(72.0), pal.text));
         if let Some(warning) = &self.cleanup_warning {
             ui.label(text(warning, semibold(13.0), pal.accent_text));
         }
@@ -822,19 +837,20 @@ impl App {
         rule(ui);
         egui::ScrollArea::vertical().id_salt("results").max_height(height).show(ui, |ui| {
             for result in &self.results {
-                let name = self.catalog.categories.iter().find(|c| c.id == result.id).map(|c| c.name.clone()).unwrap_or_default();
-                item_row(ui, &result_item(name, result), 260.0);
+                let name = self.catalog.categories.iter().find(|c| c.id == result.id).map(|c| c.name.get(t.language).to_string()).unwrap_or_default();
+                item_row(ui, &result_item(t, name, result), 260.0);
             }
         });
         ui.add_space(20.0);
-        secondary_button(ui, "Analisar de novo", 220.0).clicked().then_some(CleanupAction::Analyze)
+        secondary_button(ui, t.analyze_again, 220.0).clicked().then_some(CleanupAction::Analyze)
     }
 
     fn history_page(&mut self, ui: &mut Ui) {
         let pal = palette(ui.ctx());
-        heading(ui, "Histórico", "Limpezas feitas e sessões de Modo Jogo.");
+        let t = self.t;
+        heading(ui, t.history, t.history_subtitle);
         if self.history.is_empty() {
-            ui.label(text("Nada por aqui ainda.", regular(14.0), pal.text_muted));
+            ui.label(text(t.history_empty, regular(14.0), pal.text_muted));
             return;
         }
         rule(ui);
@@ -844,12 +860,12 @@ impl App {
             for entry in &self.history {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    column(ui, 150.0, text(&entry.date, regular(13.0), pal.text_muted));
-                    column(ui, 120.0, text(entry.kind.label(), semibold(14.0), pal.text));
-                    ui.label(text(&entry.summary, regular(13.0), pal.text_muted));
+                    column(ui, 150.0, text(t.history_date(&entry.date), regular(13.0), pal.text_muted));
+                    column(ui, 120.0, text(t.history_kind(entry.kind), semibold(14.0), pal.text));
+                    ui.label(text(t.history_summary(&entry.summary), regular(13.0), pal.text_muted));
                     if entry.freed > 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(text(storage::format_size(entry.freed), semibold(14.0), pal.text));
+                            ui.label(text(t.size(entry.freed), semibold(14.0), pal.text));
                         });
                     }
                 });
@@ -859,16 +875,30 @@ impl App {
         });
     }
 
-    fn settings_page(&mut self, ui: &mut Ui) {
-        heading(ui, "Configurações", "Aparência e preferências do app.");
-        section_label(ui, "Tema");
+    fn settings_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = self.t;
+        heading(ui, t.settings, t.settings_subtitle);
+        section_label(ui, t.theme_section);
         rule(ui);
         ui.add_space(8.0);
-        for (choice, label) in [(ThemeChoice::System, "Seguir o Windows"), (ThemeChoice::Light, "Claro"), (ThemeChoice::Dark, "Escuro")] {
+        for (choice, label) in [(ThemeChoice::System, t.follow_windows), (ThemeChoice::Light, t.theme_light), (ThemeChoice::Dark, t.theme_dark)] {
             if radio(ui, self.config.theme == choice, label).clicked() && self.config.theme != choice {
                 self.config.theme = choice;
-                theme::set_theme(ui.ctx(), choice);
+                theme::set_theme(ctx, choice);
                 self.save_config();
+            }
+        }
+        ui.add_space(22.0);
+        section_label(ui, t.language_section);
+        rule(ui);
+        ui.add_space(8.0);
+        let languages = [(LanguageChoice::System, t.follow_windows), (LanguageChoice::PortugueseBrazil, "Português (Brasil)"), (LanguageChoice::English, "English")];
+        for (choice, label) in languages {
+            if radio(ui, self.config.language == choice, label).clicked() && self.config.language != choice {
+                self.config.language = choice;
+                self.t = i18n::texts_for(choice);
+                self.save_config();
+                self.refresh_overview(ctx);
             }
         }
     }
@@ -935,7 +965,7 @@ impl eframe::App for App {
                 Page::GameMode => self.game_mode_page(ui, ctx),
                 Page::Cleanup => self.cleanup_page(ui, ctx),
                 Page::History => self.history_page(ui),
-                Page::Settings => self.settings_page(ui),
+                Page::Settings => self.settings_page(ui, ctx),
             });
         let screen = ctx.screen_rect();
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("borders")));
@@ -961,7 +991,7 @@ fn nav_item(ui: &mut Ui, number: u32, name: &str, active: bool) -> Response {
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
-fn category_row(ui: &mut Ui, category: &Category, analysis: &Analysis, selection: &mut HashSet<String>) -> Option<CleanupAction> {
+fn category_row(ui: &mut Ui, t: &Texts, category: &Category, analysis: &Analysis, selection: &mut HashSet<String>) -> Option<CleanupAction> {
     let pal = palette(ui.ctx());
     let mut action = None;
     let blocked = !analysis.blockers.is_empty();
@@ -979,25 +1009,25 @@ fn category_row(ui: &mut Ui, category: &Category, analysis: &Analysis, selection
         ui.vertical(|ui| {
             ui.set_width(text_width);
             ui.horizontal(|ui| {
-                ui.label(text(&category.name, semibold(14.5), if blocked { pal.text_faint } else { pal.text }));
+                ui.label(text(category.name.get(t.language), semibold(14.5), if blocked { pal.text_faint } else { pal.text }));
                 if analysis.has_admin {
-                    tag(ui, "Admin", pal.text_muted);
+                    tag(ui, t.tag_admin, pal.text_muted);
                 }
                 if category.slow {
-                    tag(ui, "Demorado", pal.text_muted);
+                    tag(ui, t.tag_slow, pal.text_muted);
                 }
                 if category.group == Group::Caution {
-                    tag(ui, "Atenção", pal.accent_text);
+                    tag(ui, t.tag_caution, pal.accent_text);
                 }
             });
-            ui.add(egui::Label::new(text(&category.description, regular(12.5), pal.text_muted)).wrap());
+            ui.add(egui::Label::new(text(category.description.get(t.language), regular(12.5), pal.text_muted)).wrap());
             if !analysis.details.is_empty() {
                 ui.add(egui::Label::new(text(analysis.details.join("  ·  "), regular(12.0), pal.text_muted)).wrap());
             }
             if blocked {
                 ui.horizontal(|ui| {
-                    ui.label(text(format!("Feche {} para limpar.", analysis.blockers.join(", ")), semibold(12.5), pal.accent_text));
-                    if link(ui, "Fechar agora", pal.accent_text).clicked() {
+                    ui.label(text(t.close_to_clean(&analysis.blockers.join(", ")), semibold(12.5), pal.accent_text));
+                    if link(ui, t.close_now, pal.accent_text).clicked() {
                         action = Some(CleanupAction::CloseBlockers(category.id.clone()));
                     }
                 });
@@ -1006,8 +1036,8 @@ fn category_row(ui: &mut Ui, category: &Category, analysis: &Analysis, selection
         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
             let (value, color) = match (analysis.total(), analysis.unknown_size || analysis.admin_pending()) {
                 (0, true) => ("—".to_string(), pal.text_faint),
-                (bytes, true) => (format!("{}+", storage::format_size(bytes)), pal.text),
-                (bytes, false) => (storage::format_size(bytes), pal.text),
+                (bytes, true) => (format!("{}+", t.size(bytes)), pal.text),
+                (bytes, false) => (t.size(bytes), pal.text),
             };
             ui.label(text(value, semibold(14.5), color));
         });
@@ -1017,16 +1047,15 @@ fn category_row(ui: &mut Ui, category: &Category, analysis: &Analysis, selection
     action
 }
 
-fn result_item(name: String, result: &CleanupResult) -> Item {
+fn result_item(t: &Texts, name: String, result: &CleanupResult) -> Item {
     let value = match result.tally.bytes {
-        0 => "nada removido".to_string(),
-        bytes => storage::format_size(bytes),
+        0 => t.nothing_removed.to_string(),
+        bytes => t.size(bytes),
     };
     let hint = match (&result.error, result.tally.skipped) {
         (Some(error), _) => Some(error.clone()),
         (None, 0) => None,
-        (None, 1) => Some("1 item em uso foi mantido".to_string()),
-        (None, n) => Some(format!("{n} itens em uso foram mantidos")),
+        (None, n) => Some(t.kept_in_use(n)),
     };
     let status = if result.error.is_some() { Status::Warning } else { Status::Ok };
     Item::new(name, value, status, hint)

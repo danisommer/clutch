@@ -17,6 +17,7 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_CANCELLED, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM,
     SYSTEMTIME,
 };
+use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Graphics::Gdi::{
     DEVMODEW, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS, EnumDisplayDevicesW, EnumDisplaySettingsW,
 };
@@ -291,14 +292,27 @@ pub fn guid_from_str(text: &str) -> Option<GUID> {
     u128::from_str_radix(&text.replace('-', ""), 16).ok().map(GUID::from_u128)
 }
 
-/// Name of the power mode as Windows Settings shows it.
-pub fn power_mode_name(g: &GUID) -> &'static str {
+/// The power modes Windows Settings offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PowerMode {
+    BestPerformance,
+    Balanced,
+    BestEfficiency,
+    Unknown,
+}
+
+pub fn power_mode(g: &GUID) -> PowerMode {
     match () {
-        _ if guid_eq(g, &BEST_PERFORMANCE) => "Melhor desempenho",
-        _ if guid_eq(g, &BALANCED) => "Equilibrado",
-        _ if guid_eq(g, &BEST_EFFICIENCY) => "Melhor eficiência de energia",
-        _ => "desconhecido",
+        _ if guid_eq(g, &BEST_PERFORMANCE) => PowerMode::BestPerformance,
+        _ if guid_eq(g, &BALANCED) => PowerMode::Balanced,
+        _ if guid_eq(g, &BEST_EFFICIENCY) => PowerMode::BestEfficiency,
+        _ => PowerMode::Unknown,
     }
+}
+
+/// Language of the Windows interface, as a LANGID.
+pub fn user_ui_language() -> u16 {
+    unsafe { GetUserDefaultUILanguage() }
 }
 
 /// `Some(true)` on AC power, `Some(false)` on battery, `None` on computers without a battery.
@@ -580,17 +594,25 @@ fn wait_for_state(service: *mut c_void, wanted: u32, timeout: Duration) -> bool 
     }
 }
 
+/// Why a service could not be controlled, with the Win32 error code.
+#[derive(Clone, Copy, Debug)]
+pub enum ServiceError {
+    NoManager(u32),
+    Unavailable(u32),
+}
+
 /// Stops a Windows service; returns whether it was running before.
-pub fn stop_service(name: &str) -> Result<bool, String> {
+pub fn stop_service(name: &str) -> Result<bool, ServiceError> {
     unsafe {
         let manager = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
         if manager.is_null() {
-            return Err(format!("sem acesso ao gerenciador de serviços ({})", GetLastError()));
+            return Err(ServiceError::NoManager(GetLastError()));
         }
         let service = OpenServiceW(manager, wide(name).as_ptr(), SERVICE_STOP | SERVICE_START | SERVICE_QUERY_STATUS);
         if service.is_null() {
+            let error = GetLastError();
             CloseServiceHandle(manager);
-            return Err(format!("serviço {name} indisponível ({})", GetLastError()));
+            return Err(ServiceError::Unavailable(error));
         }
         let mut status: SERVICE_STATUS = std::mem::zeroed();
         QueryServiceStatus(service, &mut status);

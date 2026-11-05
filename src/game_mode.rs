@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::storage::{self, ChosenGame, ClosedProgram, Config, Force, HistoryKind, ProgramConfig, Session};
+use crate::i18n::Texts;
+use crate::storage::{self, ChosenGame, ClosedProgram, Config, Force, HistoryKind, ProgramConfig, Session, Summary};
 use crate::steam;
 use crate::system;
 
@@ -15,6 +16,8 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(20);
 const WSL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 const MIN_FREE_MEMORY: u64 = 5 * 1024 * 1024 * 1024;
 const LENOVO_KEY: &str = r"SYSTEM\CurrentControlSet\Services\LITSSVC\LNBITS\IC\MMC";
+const WSL: &str = "WSL";
+const HWINFO: &str = "HWiNFO";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
@@ -68,13 +71,12 @@ pub struct CloseResult {
 }
 
 impl CloseResult {
-    pub fn item(&self) -> Item {
+    pub fn item(&self, t: &Texts) -> Item {
         match self.outcome {
-            CloseOutcome::Closed => Item::ok(&self.name, "fechado"),
-            CloseOutcome::ClosedInBackground => Item::ok(&self.name, "fechado")
-                .with_hint(format!("rodava em segundo plano; desative isso nas configurações do {}", self.name)),
-            CloseOutcome::Failed => Item::warning(&self.name, "não foi possível fechar", "feche manualmente"),
-            CloseOutcome::StillOpen => Item::warning(&self.name, "continua aberto", "pode haver algo não salvo; feche manualmente"),
+            CloseOutcome::Closed => Item::ok(&self.name, t.closed),
+            CloseOutcome::ClosedInBackground => Item::ok(&self.name, t.closed).with_hint(t.ran_in_background(&self.name)),
+            CloseOutcome::Failed => Item::warning(&self.name, t.could_not_close, t.close_manually),
+            CloseOutcome::StillOpen => Item::warning(&self.name, t.still_open, t.maybe_unsaved),
         }
     }
 
@@ -168,31 +170,30 @@ pub fn open_programs(config: &Config) -> Vec<String> {
         .collect()
 }
 
-fn wsl_item() -> Item {
+fn wsl_item(t: &Texts) -> Item {
     match system::wsl_running() {
-        true => Item::neutral("WSL", "ligada"),
-        false => Item::ok("WSL", "desligada"),
+        true => Item::neutral(WSL, t.wsl_running),
+        false => Item::ok(WSL, t.wsl_off),
     }
 }
 
-fn charger_item() -> Option<Item> {
+fn charger_item(t: &Texts) -> Option<Item> {
     system::on_ac_power().map(|plugged_in| match plugged_in {
-        true => Item::ok("Carregador", "conectado"),
-        false => Item::warning("Carregador", "desconectado", "conecte o carregador"),
+        true => Item::ok(t.charger, t.plugged_in),
+        false => Item::warning(t.charger, t.unplugged, t.plug_in),
     })
 }
 
-fn power_item(will_adjust: bool) -> Item {
+fn power_item(t: &Texts, will_adjust: bool) -> Item {
     let chosen = system::chosen_power_mode();
     let effective = system::effective_power_mode();
+    let name = |g: &windows_sys::core::GUID| t.power_mode_name(system::power_mode(g));
     match (chosen, effective) {
-        (_, Some(e)) if system::guid_eq(&e, &system::BEST_PERFORMANCE) => Item::ok("Modo de energia", "Melhor desempenho"),
-        (Some(c), _) if system::guid_eq(&c, &system::BEST_PERFORMANCE) => {
-            Item::warning("Modo de energia", "limitado pela Economia de energia", "desative a Economia de energia (Win+A)")
-        }
-        (_, Some(e)) if will_adjust => Item::neutral("Modo de energia", system::power_mode_name(&e)),
-        (_, Some(e)) => Item::warning("Modo de energia", system::power_mode_name(&e), "não foi possível ativar Melhor desempenho"),
-        (_, None) => Item::neutral("Modo de energia", "não identificado"),
+        (_, Some(e)) if system::guid_eq(&e, &system::BEST_PERFORMANCE) => Item::ok(t.power_mode, name(&e)),
+        (Some(c), _) if system::guid_eq(&c, &system::BEST_PERFORMANCE) => Item::warning(t.power_mode, t.limited_by_saver, t.turn_off_saver),
+        (_, Some(e)) if will_adjust => Item::neutral(t.power_mode, name(&e)),
+        (_, Some(e)) => Item::warning(t.power_mode, name(&e), t.could_not_set_best),
+        (_, None) => Item::neutral(t.power_mode, t.unknown),
     }
 }
 
@@ -206,12 +207,12 @@ enum LenovoMode {
 }
 
 impl LenovoMode {
-    fn label(self) -> &'static str {
+    fn label(self, t: &Texts) -> &'static str {
         match self {
-            LenovoMode::Adaptive => "Energia adaptável",
-            LenovoMode::Performance => "Desempenho",
-            LenovoMode::BatterySaver => "Economia de bateria",
-            LenovoMode::Unknown => "não identificado",
+            LenovoMode::Adaptive => t.lenovo_adaptive,
+            LenovoMode::Performance => t.lenovo_performance,
+            LenovoMode::BatterySaver => t.lenovo_battery_saving,
+            LenovoMode::Unknown => t.unknown,
         }
     }
 }
@@ -231,73 +232,70 @@ fn lenovo_mode() -> Option<LenovoMode> {
     })
 }
 
-fn lenovo_item() -> Option<Item> {
+fn lenovo_item(t: &Texts) -> Option<Item> {
     lenovo_mode().map(|mode| match mode {
-        LenovoMode::Performance => Item::ok("Modo Lenovo", mode.label()),
-        LenovoMode::Unknown => Item::neutral("Modo Lenovo", mode.label()).with_hint("confira no Lenovo Vantage"),
-        LenovoMode::Adaptive | LenovoMode::BatterySaver => Item::warning("Modo Lenovo", mode.label(), "selecione Desempenho no Lenovo Vantage"),
+        LenovoMode::Performance => Item::ok(t.lenovo_mode, mode.label(t)),
+        LenovoMode::Unknown => Item::neutral(t.lenovo_mode, mode.label(t)).with_hint(t.lenovo_check),
+        LenovoMode::Adaptive | LenovoMode::BatterySaver => Item::warning(t.lenovo_mode, mode.label(t), t.lenovo_select_performance),
     })
 }
 
-fn memory_item(after_closing: bool) -> Item {
+fn memory_item(t: &Texts, after_closing: bool) -> Item {
     let available = system::available_memory();
-    let value = storage::format_size(available);
+    let value = t.size(available);
     match (available >= MIN_FREE_MEMORY, after_closing) {
-        (true, _) => Item::ok("Memória disponível", value),
-        (false, true) => Item::warning("Memória disponível", value, "pouca memória; feche outros programas"),
-        (false, false) => Item::neutral("Memória disponível", value),
+        (true, _) => Item::ok(t.available_memory, value),
+        (false, true) => Item::warning(t.available_memory, value, t.low_memory),
+        (false, false) => Item::neutral(t.available_memory, value),
     }
 }
 
-fn screen_items() -> Vec<Item> {
+fn screen_items(t: &Texts) -> Vec<Item> {
     let screens = system::screens();
     let mut items: Vec<Item> = screens
         .iter()
         .map(|s| {
             let label = match (s.internal, s.name.trim()) {
-                (true, _) => "Tela do notebook".to_string(),
-                (false, "") => "Monitor externo".to_string(),
+                (true, _) => t.laptop_screen.to_string(),
+                (false, "") => t.external_monitor.to_string(),
                 (false, name) => name.to_string(),
             };
-            let value = match s.primary && screens.len() > 1 {
-                true => format!("{}x{}, {} Hz · principal", s.width, s.height, s.hz),
-                false => format!("{}x{}, {} Hz", s.width, s.height, s.hz),
-            };
+            let value = t.screen_mode(s.width, s.height, s.hz, s.primary && screens.len() > 1);
             match s.hz < s.max_hz {
-                true => Item::warning(label, value, format!("suporta {} Hz: Configurações > Sistema > Tela > Tela avançada", s.max_hz)),
+                true => Item::warning(label, value, t.supports_hz(s.max_hz)),
                 false => Item::ok(label, value),
             }
         })
         .collect();
     if screens.len() > 1 {
         if let Some((item, _)) = items.iter_mut().zip(&screens).find(|(i, s)| !s.internal && i.hint.is_none()) {
-            item.hint = Some("para jogar só nele: Win+P > Somente segunda tela".into());
+            item.hint = Some(t.second_screen_only.into());
         }
     }
     items
 }
 
-fn hwinfo_item() -> Option<Item> {
+fn hwinfo_item(t: &Texts) -> Option<Item> {
     system::processes()
         .iter()
         .any(|p| p.name.eq_ignore_ascii_case("HWiNFO64"))
-        .then(|| Item::neutral("HWiNFO", "aberto").with_hint("feche se não estiver monitorando"))
+        .then(|| Item::neutral(HWINFO, t.open).with_hint(t.close_if_not_monitoring))
 }
 
 /// Current state of the computer, before Game Mode is activated.
-pub fn overview(config: &Config) -> Vec<Item> {
+pub fn overview(config: &Config, t: &Texts) -> Vec<Item> {
     let open = open_programs(config);
     let mut items = vec![match open.is_empty() {
-        true => Item::ok("Programas pesados", "nenhum aberto"),
-        false => Item::neutral("Programas pesados", open.join(", ")),
+        true => Item::ok(t.heavy_programs, t.none_open),
+        false => Item::neutral(t.heavy_programs, open.join(", ")),
     }];
-    items.push(wsl_item());
-    items.extend(charger_item());
-    items.push(power_item(config.best_performance));
-    items.extend(lenovo_item());
-    items.push(memory_item(false));
-    items.extend(screen_items());
-    items.extend(hwinfo_item());
+    items.push(wsl_item(t));
+    items.extend(charger_item(t));
+    items.push(power_item(t, config.best_performance));
+    items.extend(lenovo_item(t));
+    items.push(memory_item(t, false));
+    items.extend(screen_items(t));
+    items.extend(hwinfo_item(t));
     items
 }
 
@@ -306,15 +304,15 @@ pub struct Activation {
     pub session: Session,
 }
 
-fn shutdown_wsl_if_idle(items: &mut Vec<Item>) {
+fn shutdown_wsl_if_idle(t: &Texts, items: &mut Vec<Item>) {
     if !system::wsl_running() {
-        items.push(Item::ok("WSL", "desligada"));
+        items.push(Item::ok(WSL, t.wsl_off));
         return;
     }
     let all = system::processes();
     let clients = system::wsl_clients(&system::self_and_ancestors(&all));
     if !clients.is_empty() {
-        items.push(Item::warning("WSL", "mantida ligada", format!("em uso por {}", clients.join(", "))));
+        items.push(Item::warning(WSL, t.wsl_kept_running, t.wsl_in_use_by(&clients.join(", "))));
         return;
     }
     system::shutdown_wsl();
@@ -323,42 +321,42 @@ fn shutdown_wsl_if_idle(items: &mut Vec<Item>) {
         thread::sleep(Duration::from_millis(500));
     }
     items.push(match system::wsl_running() {
-        true => Item::warning("WSL", "não desligou", "rode \"wsl --shutdown\" em um terminal"),
-        false => Item::ok("WSL", "desligada"),
+        true => Item::warning(WSL, t.wsl_did_not_stop, t.wsl_shutdown_hint),
+        false => Item::ok(WSL, t.wsl_off),
     });
 }
 
 /// Closes programs, shuts down WSL, sets the power mode, launches the chosen game and saves the session.
-pub fn activate(config: &Config, game: Option<&steam::Manifest>, progress: &dyn Fn(&str)) -> Activation {
+pub fn activate(config: &Config, game: Option<&steam::Manifest>, t: &Texts, progress: &dyn Fn(&str)) -> Activation {
     let mut items = Vec::new();
     let previous = system::chosen_power_mode();
 
-    progress("Fechando programas");
+    progress(t.step_closing);
     let enabled: Vec<ProgramConfig> = config.programs.iter().filter(|p| p.enabled).cloned().collect();
     let closed = close_programs(&enabled);
-    items.extend(closed.iter().map(CloseResult::item));
+    items.extend(closed.iter().map(|c| c.item(t)));
 
     if config.shutdown_wsl {
-        progress("Desligando a WSL");
-        shutdown_wsl_if_idle(&mut items);
+        progress(t.step_wsl);
+        shutdown_wsl_if_idle(t, &mut items);
     }
 
-    progress("Ajustando energia");
+    progress(t.step_power);
     let power_changed = config.best_performance
         && previous.is_some_and(|p| !system::guid_eq(&p, &system::BEST_PERFORMANCE))
         && system::set_power_mode(system::BEST_PERFORMANCE);
-    items.extend(charger_item());
-    items.push(power_item(false));
-    items.extend(lenovo_item());
-    items.push(memory_item(true));
-    items.extend(screen_items().into_iter().filter(|i| i.status == Status::Warning || i.hint.is_some()));
+    items.extend(charger_item(t));
+    items.push(power_item(t, false));
+    items.extend(lenovo_item(t));
+    items.push(memory_item(t, true));
+    items.extend(screen_items(t).into_iter().filter(|i| i.status == Status::Warning || i.hint.is_some()));
 
     if let Some(g) = game {
-        progress("Abrindo o jogo");
+        progress(t.step_game);
         let launched = system::shell_open(&format!("steam://rungameid/{}", g.app_id));
         items.push(match launched {
-            true => Item::ok("Jogo", &g.name),
-            false => Item::warning("Jogo", &g.name, "não foi possível abrir pela Steam"),
+            true => Item::ok(t.game, &g.name),
+            false => Item::warning(t.game, &g.name, t.could_not_launch_steam),
         });
     }
 
@@ -374,32 +372,28 @@ pub fn activate(config: &Config, game: Option<&steam::Manifest>, progress: &dyn 
 }
 
 /// Restores the previous power mode, reopens the closed programs and records the session in the history.
-pub fn deactivate(session: &Session, reopen: bool) -> Vec<Item> {
+pub fn deactivate(session: &Session, reopen: bool, t: &Texts) -> Vec<Item> {
     let mut items = Vec::new();
     if let Some(previous) = session.previous_power_mode.as_deref().and_then(system::guid_from_str) {
         items.push(match system::set_power_mode(previous) {
-            true => Item::ok("Modo de energia", format!("voltou para {}", system::power_mode_name(&previous))),
-            false => Item::warning("Modo de energia", "não foi possível restaurar", "ajuste em Configurações > Sistema > Energia"),
+            true => Item::ok(t.power_mode, t.power_back_to(t.power_mode_name(system::power_mode(&previous)))),
+            false => Item::warning(t.power_mode, t.could_not_restore, t.power_settings_hint),
         });
     }
     if reopen {
         for program in &session.closed_programs {
             let target = program.aumid.as_ref().map(|a| format!("shell:AppsFolder\\{a}")).or_else(|| program.path.clone());
-            items.push(match target.is_some_and(|t| system::shell_open(&t)) {
-                true => Item::ok(&program.name, "reaberto"),
-                false => Item::warning(&program.name, "não foi reaberto", "abra manualmente"),
+            items.push(match target.is_some_and(|path| system::shell_open(&path)) {
+                true => Item::ok(&program.name, t.reopened),
+                false => Item::warning(&program.name, t.not_reopened, t.open_manually),
             });
         }
     }
     if lenovo_mode() == Some(LenovoMode::Performance) {
-        items.push(Item::neutral("Modo Lenovo", LenovoMode::Performance.label()).with_hint("volte para Energia adaptável no Lenovo Vantage"));
+        items.push(Item::neutral(t.lenovo_mode, LenovoMode::Performance.label(t)).with_hint(t.lenovo_back_to_adaptive));
     }
-    let duration = storage::now_epoch().saturating_sub(session.started_at);
-    let summary = match &session.game {
-        Some(g) => format!("{} por {}", g.name, storage::format_duration(duration)),
-        None => format!("Modo Jogo por {}", storage::format_duration(duration)),
-    };
-    storage::add_history(HistoryKind::GameMode, 0, summary);
+    let seconds = storage::now_epoch().saturating_sub(session.started_at);
+    storage::add_history(HistoryKind::GameMode, 0, Summary::GameMode { game: session.game.as_ref().map(|g| g.name.clone()), seconds });
     storage::delete_session();
     items
 }
@@ -437,6 +431,7 @@ pub fn programs_to_add(config: &Config) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::PT_BR;
 
     #[test]
     #[ignore]
@@ -457,7 +452,7 @@ mod tests {
     #[test]
     #[ignore]
     fn print_overview() {
-        for item in overview(&Config::default()) {
+        for item in overview(&Config::default(), &PT_BR) {
             println!("{:<30} {:<40} {:?} {}", item.label, item.value, item.status, item.hint.unwrap_or_default());
         }
         for game in steam::games() {

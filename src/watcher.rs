@@ -9,7 +9,7 @@ use std::time::Duration;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
 use windows_sys::Win32::System::Threading::{CreateMutexW, OpenMutexW};
 
-use crate::{game_mode, storage, system};
+use crate::{game_mode, i18n, storage, system};
 
 pub const ARG: &str = "--watcher";
 const WATCHER_MUTEX: &str = r"Local\ModoJogoLimpeza.Watcher";
@@ -96,7 +96,8 @@ pub fn run() -> i32 {
         thread::sleep(POLL_INTERVAL);
     }
     let Some(session) = storage::claim_session() else { return 0 };
-    let items = game_mode::deactivate(&session, storage::load_config().reopen_on_exit);
+    let config = storage::load_config();
+    let items = game_mode::deactivate(&session, config.reopen_on_exit, i18n::texts_for(config.language));
     let _ = storage::save_last_summary(&items);
     if !marker_exists(WINDOW_MUTEX) {
         if let Ok(exe) = std::env::current_exe() {

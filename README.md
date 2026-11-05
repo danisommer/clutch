@@ -4,7 +4,7 @@
 
 *Modo Jogo e Limpeza* is Portuguese for "Game Mode & Cleanup". It prepares the computer for a gaming session and puts it back the way it was afterwards. It can also find and remove temporary files, caches and leftovers, deleting nothing until you confirm.
 
-> The interface is currently in Brazilian Portuguese only. Other languages are on the [roadmap](#roadmap).
+The interface is available in Brazilian Portuguese and English. By default it follows the Windows display language: Portuguese when Windows is in Portuguese, English otherwise.
 
 ## Download
 
@@ -51,6 +51,7 @@ A list of the cleanups done, with space freed, and of past Game Mode sessions.
 ### Settings
 
 - **Theme**: light, dark, or following the Windows setting (the default).
+- **Language**: Português (Brasil), English, or following Windows (the default).
 
 ## Safety model
 
@@ -116,7 +117,7 @@ cargo test print_ -- --ignored --nocapture      # read-only diagnostics of this 
 
 ### Catalog format
 
-Each category has an `id`, a `name`, a `description` and a `group` (`system`, `programs`, `leftovers` or `caution`). It can also have:
+Each category has an `id`, a `name`, a `description` and a `group` (`system`, `programs`, `leftovers` or `caution`). The `name` and the `description` have one text per language, as in `{ "pt-BR": "Arquivos temporários", "en": "Temporary files" }`; a test fails when a built-in category misses one. A category can also have:
 
 - `selectedByDefault`;
 - `slow`;
@@ -145,7 +146,8 @@ Targets with `"admin": true` run in the elevated helper. Targets with `notInstal
 src/
   main.rs        entry point: window, --watcher and --admin modes
   app.rs         main window and pages
-  theme.rs       colors, fonts and widgets
+  theme.rs       light and dark palettes, fonts and widgets
+  i18n.rs        every text shown to the user, in Portuguese and English
   game_mode.rs   status checks, closing programs, activation and restore
   watcher.rs     background process that ends the session when the game exits
   cleanup.rs     catalog, safety rules, analysis and removal
@@ -170,7 +172,7 @@ Planned:
 
 - [x] Downloadable releases (prebuilt executables on GitHub Releases)
 - [x] Dark mode
-- [ ] Multiple languages, starting with English
+- [x] Multiple languages, starting with English
 - [ ] Support for more CPU and GPU vendors (NVIDIA and Intel shader caches, vendor tools)
 - [ ] Support for more laptop vendors' performance modes (ASUS, MSI, Dell, HP, Acer…)
 - [ ] Deeper cleanup and optimization that stays safe and customizable

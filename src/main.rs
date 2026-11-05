@@ -4,6 +4,7 @@ mod admin;
 mod app;
 mod cleanup;
 mod game_mode;
+mod i18n;
 mod steam;
 mod storage;
 mod system;

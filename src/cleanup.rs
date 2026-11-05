@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{LocalizedText, Texts};
 use crate::{steam, storage, system};
 
 const CATALOG: &str = include_str!("../categories.json");
@@ -29,23 +30,14 @@ pub enum Group {
 
 impl Group {
     pub const ALL: [Group; 4] = [Group::System, Group::Programs, Group::Leftovers, Group::Caution];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Group::System => "Sistema",
-            Group::Programs => "Programas",
-            Group::Leftovers => "Restos",
-            Group::Caution => "Atenção",
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Category {
     pub id: String,
-    pub name: String,
-    pub description: String,
+    pub name: LocalizedText,
+    pub description: LocalizedText,
     pub group: Group,
     #[serde(default = "default_true")]
     pub selected_by_default: bool,
@@ -472,8 +464,27 @@ fn all_but_newest(base: &Path, pattern: Option<&str>) -> Vec<PathBuf> {
     items.into_iter().skip(1).map(|(_, p)| p).collect()
 }
 
+/// Something worth showing about what a target found, translated by `Detail::describe`.
+enum Detail {
+    NotInstalled(String),
+    Sessions(usize),
+    StaleExtensions(usize),
+    SteamLeftover { name: String, drive: String, bytes: u64 },
+}
+
+impl Detail {
+    fn describe(&self, t: &Texts) -> String {
+        match self {
+            Detail::NotInstalled(program) => program.clone(),
+            Detail::Sessions(count) => t.sessions(*count),
+            Detail::StaleExtensions(count) => t.stale_extensions(*count),
+            Detail::SteamLeftover { name, drive, bytes } => format!("{name} ({drive}, {})", t.size(*bytes)),
+        }
+    }
+}
+
 /// Turns a catalog target into concrete, already validated operations, plus details for the UI.
-fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<String>) {
+fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<Detail>) {
     let is_leftover = !target.not_installed.is_empty();
     let paths = || expand(&target.path);
     match target.mode {
@@ -487,7 +498,7 @@ fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<String>) {
         Mode::Folder | Mode::File => {
             let found = valid_paths(rules, paths(), is_leftover);
             let details = match is_leftover && !found.is_empty() {
-                true => target.not_installed.clone(),
+                true => target.not_installed.iter().cloned().map(Detail::NotInstalled).collect(),
                 false => Vec::new(),
             };
             (found.into_iter().map(Operation::Remove).collect(), details)
@@ -502,8 +513,7 @@ fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<String>) {
             let inactive = valid_paths(rules, inactive, false);
             let details = match inactive.len() {
                 0 => Vec::new(),
-                1 => vec!["1 sessão".into()],
-                n => vec![format!("{n} sessões")],
+                n => vec![Detail::Sessions(n)],
             };
             (inactive.into_iter().map(Operation::Remove).collect(), details)
         }
@@ -515,8 +525,7 @@ fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<String>) {
             let stale = valid_paths(rules, paths().iter().flat_map(|b| stale_extensions(b)), false);
             let details = match stale.len() {
                 0 => Vec::new(),
-                1 => vec!["1 extensão desatualizada".into()],
-                n => vec![format!("{n} extensões desatualizadas")],
+                n => vec![Detail::StaleExtensions(n)],
             };
             (stale.into_iter().map(Operation::Remove).collect(), details)
         }
@@ -524,10 +533,10 @@ fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<String>) {
             let leftovers = valid_paths(rules, steam_leftovers(), false);
             let details = leftovers
                 .iter()
-                .map(|l| {
-                    let drive = l.to_string_lossy().chars().take(2).collect::<String>();
-                    let size = storage::format_size(sweep(l, 0, &[], false, false).bytes);
-                    format!("{} ({drive}, {size})", file_name_of(l))
+                .map(|l| Detail::SteamLeftover {
+                    name: file_name_of(l),
+                    drive: l.to_string_lossy().chars().take(2).collect(),
+                    bytes: sweep(l, 0, &[], false, false).bytes,
                 })
                 .collect();
             (leftovers.into_iter().map(Operation::Remove).collect(), details)
@@ -546,12 +555,12 @@ fn measure(operation: &Operation) -> Option<Tally> {
     }
 }
 
-fn execute(operation: &Operation) -> Result<Tally, String> {
+fn execute(operation: &Operation, texts: &Texts) -> Result<Tally, String> {
     match operation {
         Operation::Contents { path, age_hours, exclude } => Ok(sweep(path, *age_hours, exclude, true, false)),
         Operation::Remove(p) => Ok(sweep(p, 0, &[], true, true)),
         Operation::WindowsUpdate(p) => {
-            let was_running = system::stop_service("wuauserv")?;
+            let was_running = system::stop_service("wuauserv").map_err(|e| texts.service_error("wuauserv", e))?;
             let tally = sweep(p, 0, &[], true, false);
             if was_running {
                 system::start_service("wuauserv");
@@ -561,16 +570,16 @@ fn execute(operation: &Operation) -> Result<Tally, String> {
         Operation::DeliveryOptimization(p) => {
             let before = sweep(p, 0, &[], false, false);
             system::run_hidden("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", "Delete-DeliveryOptimizationCache -Force"])
-                .map_err(|e| format!("não foi possível limpar: {e}"))?;
+                .map_err(|e| texts.could_not_clean(&e.to_string()))?;
             let after = sweep(p, 0, &[], false, false);
             Ok(Tally { bytes: before.bytes.saturating_sub(after.bytes), files: before.files.saturating_sub(after.files), skipped: 0 })
         }
         Operation::ComponentStore => {
             let before = system::free_space("C:\\").unwrap_or(0);
             let output = system::run_hidden("dism.exe", &["/Online", "/Cleanup-Image", "/StartComponentCleanup"])
-                .map_err(|e| format!("não foi possível rodar o DISM: {e}"))?;
+                .map_err(|e| texts.could_not_run_dism(&e.to_string()))?;
             if !output.status.success() {
-                return Err(format!("o DISM terminou com código {}", output.status.code().unwrap_or(-1)));
+                return Err(texts.dism_exit_code(output.status.code().unwrap_or(-1)));
             }
             let after = system::free_space("C:\\").unwrap_or(0);
             Ok(Tally { bytes: after.saturating_sub(before), files: 0, skipped: 0 })
@@ -636,7 +645,7 @@ impl Analysis {
 }
 
 /// Measures everything that can be measured without administrator rights; admin parts are flagged to be measured later.
-pub fn analyze(progress: &dyn Fn(&str)) -> Vec<Analysis> {
+pub fn analyze(texts: &Texts, progress: &dyn Fn(&str)) -> Vec<Analysis> {
     let rules = Rules::load();
     let installed = installed_lowercase();
     let processes = system::processes();
@@ -644,7 +653,7 @@ pub fn analyze(progress: &dyn Fn(&str)) -> Vec<Analysis> {
         .categories
         .iter()
         .map(|category| {
-            progress(&category.name);
+            progress(category.name.get(texts.language));
             let mut analysis = Analysis { id: category.id.clone(), blockers: open_blockers(category, &processes), ..Default::default() };
             for target in category.targets.iter().filter(|t| applies(t, &installed)) {
                 if target.admin {
@@ -654,7 +663,7 @@ pub fn analyze(progress: &dyn Fn(&str)) -> Vec<Analysis> {
                 }
                 let (ops, details) = operations(target, &rules);
                 analysis.user_bytes += ops.iter().filter_map(measure).map(|t| t.bytes).sum::<u64>();
-                analysis.details.extend(details);
+                analysis.details.extend(details.iter().map(|d| d.describe(texts)));
             }
             analysis.details.dedup();
             analysis
@@ -692,7 +701,7 @@ pub struct CleanupResult {
 }
 
 /// Cleans the chosen categories. Without elevation only the user targets run; elevated, only the admin targets.
-pub fn clean(ids: &[String], elevated: bool, progress: &dyn Fn(&str)) -> Vec<CleanupResult> {
+pub fn clean(ids: &[String], elevated: bool, texts: &Texts, progress: &dyn Fn(&str)) -> Vec<CleanupResult> {
     let rules = Rules::load();
     let installed = installed_lowercase();
     let processes = system::processes();
@@ -701,16 +710,16 @@ pub fn clean(ids: &[String], elevated: bool, progress: &dyn Fn(&str)) -> Vec<Cle
         .filter_map(|id| catalog.categories.iter().find(|c| &c.id == id))
         .filter(|c| c.targets.iter().any(|t| t.admin == elevated))
         .map(|category| {
-            progress(&category.name);
+            progress(category.name.get(texts.language));
             let mut result = CleanupResult { id: category.id.clone(), ..Default::default() };
             let blockers = open_blockers(category, &processes);
             if !blockers.is_empty() {
-                result.error = Some(format!("feche: {}", blockers.join(", ")));
+                result.error = Some(texts.close_first(&blockers.join(", ")));
                 return result;
             }
             for target in category.targets.iter().filter(|t| t.admin == elevated && applies(t, &installed)) {
                 for operation in operations(target, &rules).0 {
-                    match execute(&operation) {
+                    match execute(&operation, texts) {
                         Ok(t) => result.tally.add(t),
                         Err(e) => result.error = Some(e),
                     }
@@ -724,6 +733,7 @@ pub fn clean(ids: &[String], elevated: bool, progress: &dyn Fn(&str)) -> Vec<Cle
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::PT_BR;
 
     #[test]
     fn wildcard_matching() {
@@ -822,18 +832,21 @@ mod tests {
         let c = catalog();
         let ids: HashSet<&str> = c.categories.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids.len(), c.categories.len(), "duplicate ids in the catalog");
+        for category in &c.categories {
+            assert!(category.name.is_translated() && category.description.is_translated(), "{} needs pt-BR and en texts", category.id);
+        }
     }
 
     #[test]
     #[ignore]
     fn print_analysis() {
         let catalog = catalog();
-        for a in analyze(&|_| {}).iter().filter(|a| a.has_content()) {
-            let name = &catalog.categories.iter().find(|c| c.id == a.id).unwrap().name;
+        for a in analyze(&PT_BR, &|_| {}).iter().filter(|a| a.has_content()) {
+            let name = catalog.categories.iter().find(|c| c.id == a.id).unwrap().name.get(PT_BR.language);
             println!(
                 "{:<36} {:>10} admin={:<5} unknown={:<5} blockers={:?} details={:?}",
                 name,
-                storage::format_size(a.total()),
+                PT_BR.size(a.total()),
                 a.has_admin,
                 a.unknown_size,
                 a.blockers,

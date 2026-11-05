@@ -2,8 +2,8 @@
   "categories": [
     {
       "id": "temp",
-      "name": "Arquivos temporários",
-      "description": "Arquivos que os programas deixaram na pasta temporária, com mais de um dia.",
+      "name": { "pt-BR": "Arquivos temporários", "en": "Temporary files" },
+      "description": { "pt-BR": "Arquivos que os programas deixaram na pasta temporária, com mais de um dia.", "en": "Files that programs left in the temporary folder, older than one day." },
       "group": "system",
       "targets": [
         { "path": "%TEMP%", "mode": "contents", "ageHours": 24, "exclude": ["claude"] }
@@ -11,8 +11,8 @@
     },
     {
       "id": "claude-sessions",
-      "name": "Sessões encerradas do Claude",
-      "description": "Pastas temporárias de conversas do Claude Code que já terminaram.",
+      "name": { "pt-BR": "Sessões encerradas do Claude", "en": "Finished Claude sessions" },
+      "description": { "pt-BR": "Pastas temporárias de conversas do Claude Code que já terminaram.", "en": "Temporary folders of Claude Code conversations that have ended." },
       "group": "system",
       "targets": [
         { "path": "%TEMP%\\claude", "mode": "inactiveFolders", "depth": 2, "ageHours": 24 }
@@ -20,8 +20,8 @@
     },
     {
       "id": "windows-temp",
-      "name": "Temporários do Windows",
-      "description": "Arquivos temporários do próprio sistema, com mais de um dia.",
+      "name": { "pt-BR": "Temporários do Windows", "en": "Windows temporary files" },
+      "description": { "pt-BR": "Arquivos temporários do próprio sistema, com mais de um dia.", "en": "Temporary files of the system itself, older than one day." },
       "group": "system",
       "targets": [
         { "path": "%WINDIR%\\Temp", "mode": "contents", "ageHours": 24, "admin": true },
@@ -30,8 +30,8 @@
     },
     {
       "id": "windows-update",
-      "name": "Downloads do Windows Update",
-      "description": "Atualizações que já foram baixadas e instaladas.",
+      "name": { "pt-BR": "Downloads do Windows Update", "en": "Windows Update downloads" },
+      "description": { "pt-BR": "Atualizações que já foram baixadas e instaladas.", "en": "Updates that were already downloaded and installed." },
       "group": "system",
       "targets": [
         { "path": "%WINDIR%\\SoftwareDistribution\\Download", "mode": "windowsUpdate", "admin": true }
@@ -39,8 +39,8 @@
     },
     {
       "id": "delivery-optimization",
-      "name": "Otimização de Entrega",
-      "description": "Partes de atualizações que o Windows guarda para compartilhar com outros computadores.",
+      "name": { "pt-BR": "Otimização de Entrega", "en": "Delivery Optimization" },
+      "description": { "pt-BR": "Partes de atualizações que o Windows guarda para compartilhar com outros computadores.", "en": "Pieces of updates that Windows keeps to share with other computers." },
       "group": "system",
       "targets": [
         { "path": "%WINDIR%\\ServiceProfiles\\NetworkService\\AppData\\Local\\Microsoft\\Windows\\DeliveryOptimization\\Cache", "mode": "deliveryOptimization", "admin": true }
@@ -48,8 +48,8 @@
     },
     {
       "id": "crash-dumps",
-      "name": "Despejos de travamento",
-      "description": "Cópias de memória e relatórios de falhas antigas. Só servem para investigar travamentos.",
+      "name": { "pt-BR": "Despejos de travamento", "en": "Crash dumps" },
+      "description": { "pt-BR": "Cópias de memória e relatórios de falhas antigas. Só servem para investigar travamentos.", "en": "Memory copies and reports of past crashes. They are only useful to investigate crashes." },
       "group": "system",
       "targets": [
         { "path": "%LOCALAPPDATA%\\CrashDumps", "mode": "contents" },
@@ -63,8 +63,8 @@
     },
     {
       "id": "component-store",
-      "name": "Componentes antigos do Windows",
-      "description": "Versões substituídas de componentes do sistema. Pode levar até 15 minutos.",
+      "name": { "pt-BR": "Componentes antigos do Windows", "en": "Old Windows components" },
+      "description": { "pt-BR": "Versões substituídas de componentes do sistema. Pode levar até 15 minutos.", "en": "Replaced versions of system components. It can take up to 15 minutes." },
       "group": "system",
       "selectedByDefault": false,
       "slow": true,
@@ -74,8 +74,8 @@
     },
     {
       "id": "vscode",
-      "name": "Visual Studio Code",
-      "description": "Extensões desatualizadas, pacotes de instalação, relatórios de falha e logs antigos.",
+      "name": { "pt-BR": "Visual Studio Code", "en": "Visual Studio Code" },
+      "description": { "pt-BR": "Extensões desatualizadas, pacotes de instalação, relatórios de falha e logs antigos.", "en": "Outdated extensions, installation packages, crash reports and old logs." },
       "group": "programs",
       "targets": [
         { "path": "%USERPROFILE%\\.vscode\\extensions", "mode": "staleVsCodeExtensions" },
@@ -87,8 +87,8 @@
     },
     {
       "id": "chrome",
-      "name": "Google Chrome",
-      "description": "Cache de sites e de componentes. Não desconecta de nenhuma conta.",
+      "name": { "pt-BR": "Google Chrome", "en": "Google Chrome" },
+      "description": { "pt-BR": "Cache de sites e de componentes. Não desconecta de nenhuma conta.", "en": "Website and component cache. It does not sign you out of any account." },
       "group": "programs",
       "blockedBy": [{ "process": "chrome", "name": "Google Chrome" }],
       "targets": [
@@ -106,8 +106,8 @@
     },
     {
       "id": "edge",
-      "name": "Microsoft Edge",
-      "description": "Cache de sites e de componentes. Não desconecta de nenhuma conta.",
+      "name": { "pt-BR": "Microsoft Edge", "en": "Microsoft Edge" },
+      "description": { "pt-BR": "Cache de sites e de componentes. Não desconecta de nenhuma conta.", "en": "Website and component cache. It does not sign you out of any account." },
       "group": "programs",
       "blockedBy": [{ "process": "msedge", "name": "Microsoft Edge" }],
       "targets": [
@@ -121,8 +121,8 @@
     },
     {
       "id": "steam",
-      "name": "Steam",
-      "description": "Cache da loja, logs e relatórios de falha.",
+      "name": { "pt-BR": "Steam", "en": "Steam" },
+      "description": { "pt-BR": "Cache da loja, logs e relatórios de falha.", "en": "Store cache, logs and crash reports." },
       "group": "programs",
       "blockedBy": [{ "process": "steam", "name": "Steam" }],
       "targets": [
@@ -134,8 +134,8 @@
     },
     {
       "id": "launchers",
-      "name": "Epic, Ubisoft, EA e Riot",
-      "description": "Cache e logs dos launchers de jogos.",
+      "name": { "pt-BR": "Epic, Ubisoft, EA e Riot", "en": "Epic, Ubisoft, EA and Riot" },
+      "description": { "pt-BR": "Cache e logs dos launchers de jogos.", "en": "Cache and logs of the game launchers." },
       "group": "programs",
       "blockedBy": [
         { "process": "EpicGamesLauncher", "name": "Epic Games" },
@@ -153,8 +153,8 @@
     },
     {
       "id": "discord",
-      "name": "Discord",
-      "description": "Instaladores de versões antigas.",
+      "name": { "pt-BR": "Discord", "en": "Discord" },
+      "description": { "pt-BR": "Instaladores de versões antigas.", "en": "Installers of old versions." },
       "group": "programs",
       "blockedBy": [{ "process": "Discord", "name": "Discord" }],
       "targets": [
@@ -163,8 +163,8 @@
     },
     {
       "id": "ghub",
-      "name": "Logitech G HUB",
-      "description": "Cache de downloads de atualizações.",
+      "name": { "pt-BR": "Logitech G HUB", "en": "Logitech G HUB" },
+      "description": { "pt-BR": "Cache de downloads de atualizações.", "en": "Cache of update downloads." },
       "group": "programs",
       "blockedBy": [{ "process": "lghub", "name": "Logitech G HUB" }],
       "targets": [
@@ -173,8 +173,8 @@
     },
     {
       "id": "amd-installers",
-      "name": "Instaladores de driver da AMD",
-      "description": "Arquivos extraídos durante a instalação de drivers de vídeo.",
+      "name": { "pt-BR": "Instaladores de driver da AMD", "en": "AMD driver installers" },
+      "description": { "pt-BR": "Arquivos extraídos durante a instalação de drivers de vídeo.", "en": "Files extracted while installing graphics drivers." },
       "group": "programs",
       "targets": [
         { "path": "%SYSTEMDRIVE%\\AMD", "mode": "contents", "admin": true }
@@ -182,8 +182,8 @@
     },
     {
       "id": "program-leftovers",
-      "name": "Restos de programas desinstalados",
-      "description": "Pastas que sobraram depois de desinstalar programas.",
+      "name": { "pt-BR": "Restos de programas desinstalados", "en": "Leftovers of uninstalled programs" },
+      "description": { "pt-BR": "Pastas que sobraram depois de desinstalar programas.", "en": "Folders left behind after uninstalling programs." },
       "group": "leftovers",
       "targets": [
         { "path": "%PROGRAMFILES%\\Warp", "mode": "folder", "notInstalled": ["Warp"], "admin": true },
@@ -198,8 +198,8 @@
     },
     {
       "id": "chrome-ai-model",
-      "name": "Modelo de IA do Chrome",
-      "description": "Modelo que o Chrome usa em recursos de IA locais. Ele é baixado de novo se algum recurso precisar.",
+      "name": { "pt-BR": "Modelo de IA do Chrome", "en": "Chrome AI model" },
+      "description": { "pt-BR": "Modelo que o Chrome usa em recursos de IA locais. Ele é baixado de novo se algum recurso precisar.", "en": "Model that Chrome uses for on-device AI features. It is downloaded again if a feature needs it." },
       "group": "caution",
       "selectedByDefault": false,
       "blockedBy": [{ "process": "chrome", "name": "Google Chrome" }],
@@ -209,8 +209,8 @@
     },
     {
       "id": "amd-shaders",
-      "name": "Cache de shaders da AMD",
-      "description": "Os jogos recompilam os shaders depois e podem travar nas primeiras partidas.",
+      "name": { "pt-BR": "Cache de shaders da AMD", "en": "AMD shader cache" },
+      "description": { "pt-BR": "Os jogos recompilam os shaders depois e podem travar nas primeiras partidas.", "en": "Games compile the shaders again and may stutter in the first matches." },
       "group": "caution",
       "selectedByDefault": false,
       "targets": [
@@ -222,8 +222,8 @@
     },
     {
       "id": "steam-leftovers",
-      "name": "Pastas de jogos desinstalados",
-      "description": "Pastas na biblioteca da Steam sem jogo instalado. Podem guardar replays, mods ou projetos seus.",
+      "name": { "pt-BR": "Pastas de jogos desinstalados", "en": "Folders of uninstalled games" },
+      "description": { "pt-BR": "Pastas na biblioteca da Steam sem jogo instalado. Podem guardar replays, mods ou projetos seus.", "en": "Folders in the Steam library without an installed game. They may hold your replays, mods or projects." },
       "group": "caution",
       "selectedByDefault": false,
       "blockedBy": [{ "process": "steam", "name": "Steam" }],
@@ -233,8 +233,8 @@
     },
     {
       "id": "uninstalled-app-data",
-      "name": "Dados de programas desinstalados",
-      "description": "Perfis de navegadores e dados de apps removidos. Podem ter favoritos ou senhas salvas.",
+      "name": { "pt-BR": "Dados de programas desinstalados", "en": "Data of uninstalled programs" },
+      "description": { "pt-BR": "Perfis de navegadores e dados de apps removidos. Podem ter favoritos ou senhas salvas.", "en": "Browser profiles and data of removed apps. They may hold bookmarks or saved passwords." },
       "group": "caution",
       "selectedByDefault": false,
       "targets": [

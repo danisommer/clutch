@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
+use crate::i18n::{self, Language};
 use crate::{cleanup, storage, system};
 
 pub const ARG: &str = "--admin";
@@ -11,6 +14,13 @@ pub const ARG: &str = "--admin";
 const EXIT_OK: i32 = 0;
 const EXIT_BAD_ARGS: i32 = 2;
 const EXIT_WRITE_FAILED: i32 = 3;
+
+/// What the window asks the elevated process to clean, and the language of its messages.
+#[derive(Serialize, Deserialize)]
+struct CleanRequest {
+    ids: Vec<String>,
+    language: Language,
+}
 
 /// Folder used to pass requests and results between the window and the elevated process.
 pub fn exchange_dir() -> PathBuf {
@@ -31,6 +41,10 @@ fn write_result<T: serde::Serialize>(path: &Path, value: &T) -> i32 {
     }
 }
 
+fn read_request(path: &Path) -> Option<CleanRequest> {
+    fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok())
+}
+
 /// Handles `--admin analyze <out>` and `--admin clean <in> <out>`. Exit codes: 0 ok, 2 bad arguments, 3 write failure.
 pub fn run(args: &[String]) -> i32 {
     let parts: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -41,30 +55,31 @@ pub fn run(args: &[String]) -> i32 {
         },
         [_, ARG, "clean", input, output] => {
             let (Some(input), Some(output)) = (inside_exchange_dir(input), inside_exchange_dir(output)) else { return EXIT_BAD_ARGS };
-            let ids: Vec<String> = fs::read(&input).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            let Some(request) = read_request(&input) else { return EXIT_BAD_ARGS };
             let catalog = cleanup::catalog();
-            let known: Vec<String> = ids.into_iter().filter(|id| catalog.categories.iter().any(|c| &c.id == id)).collect();
-            write_result(&output, &cleanup::clean(&known, true, &|_| {}))
+            let known: Vec<String> = request.ids.into_iter().filter(|id| catalog.categories.iter().any(|c| &c.id == id)).collect();
+            write_result(&output, &cleanup::clean(&known, true, i18n::texts(request.language), &|_| {}))
         }
         _ => EXIT_BAD_ARGS,
     }
 }
 
+#[derive(Debug)]
 pub enum AdminError {
     Cancelled,
-    Failed(String),
+    RequestFailed(u32),
+    NoResult,
+    ExitCode(u32),
+    Io(String),
 }
 
 fn invoke<T: serde::de::DeserializeOwned>(params: String, output: &Path) -> Result<T, AdminError> {
     let _ = fs::remove_file(output);
     match system::run_elevated(&params) {
         Err(system::ElevationError::Cancelled) => Err(AdminError::Cancelled),
-        Err(system::ElevationError::Failed(code)) => Err(AdminError::Failed(format!("não foi possível pedir permissão ({code})"))),
-        Ok(0) => fs::read(output)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .ok_or_else(|| AdminError::Failed("o modo administrador não devolveu resultado".into())),
-        Ok(code) => Err(AdminError::Failed(format!("o modo administrador terminou com código {code}"))),
+        Err(system::ElevationError::Failed(code)) => Err(AdminError::RequestFailed(code)),
+        Ok(0) => fs::read(output).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or(AdminError::NoResult),
+        Ok(code) => Err(AdminError::ExitCode(code)),
     }
 }
 
@@ -75,9 +90,11 @@ pub fn measure_system() -> Result<HashMap<String, u64>, AdminError> {
 }
 
 /// Asks for elevation and cleans the system targets of the chosen categories.
-pub fn clean_system(ids: &[String]) -> Result<Vec<cleanup::CleanupResult>, AdminError> {
+pub fn clean_system(ids: &[String], language: Language) -> Result<Vec<cleanup::CleanupResult>, AdminError> {
     let input = exchange_dir().join("request.json");
     let output = exchange_dir().join("result.json");
-    fs::write(&input, serde_json::to_vec(ids).unwrap_or_default()).map_err(|e| AdminError::Failed(e.to_string()))?;
+    let request = CleanRequest { ids: ids.to_vec(), language };
+    let bytes = serde_json::to_vec(&request).map_err(|e| AdminError::Io(e.to_string()))?;
+    fs::write(&input, bytes).map_err(|e| AdminError::Io(e.to_string()))?;
     invoke(format!("{ARG} clean \"{}\" \"{}\"", input.display(), output.display()), &output)
 }
