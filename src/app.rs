@@ -1043,6 +1043,15 @@ impl App {
     fn settings_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let t = self.t;
         heading(ui, t.settings, t.settings_subtitle);
+        let width = ui.available_width();
+        egui::ScrollArea::vertical().id_salt("settings").show(ui, |ui| {
+            ui.set_width(width);
+            self.settings_sections(ui, ctx);
+        });
+    }
+
+    fn settings_sections(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let t = self.t;
         section_label(ui, t.theme_section);
         rule(ui);
         ui.add_space(8.0);
