@@ -38,10 +38,11 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
 - **Analysis first**: the app analyzes before anything is touched and shows the size of each category. You check what to clean.
 - **Categories covered**:
   - Windows temp files, Windows Update downloads, Delivery Optimization, crash dumps and the component store;
-  - caches and logs of Chrome, Edge, VS Code, Steam, Epic, Ubisoft, EA, Riot, Discord, Logitech G HUB and AMD driver installers;
+  - caches and logs of Chrome, Edge, Brave, Firefox, VS Code, Steam, Epic, Ubisoft, EA, Riot, Discord, Logitech G HUB and AMD driver installers;
+  - npm, pip and Yarn package caches (not preselected);
   - leftovers of uninstalled programs.
 - **Remembered selection**: what you check is remembered when you clean, and the next analysis starts the same way. Settings has a link to go back to the defaults.
-- **Caution group**: categories that can cost you something are tagged and never preselected, not even after you cleaned them once. Examples are AMD shader caches, folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
+- **Caution group**: categories that can cost you something are tagged and never preselected, not even after you cleaned them once. Examples are the Recycle Bin, AMD and DirectX shader caches, folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
 - **Elevation only when needed**: administrator rights are requested only for system items. That means one optional prompt to measure them and one prompt to clean them, and only when a selected category has any.
 - **Running programs block their category**: if Chrome is open, its cache is skipped and you can close it from the app.
 
@@ -140,6 +141,7 @@ A target's `path` accepts environment variables, `%STEAM%` and `*` wildcards. It
 | `windowsUpdate` | Stops Windows Update, clears its download cache and starts it again |
 | `deliveryOptimization` | Runs `Delete-DeliveryOptimizationCache` |
 | `componentStore` | Runs `DISM /Online /Cleanup-Image /StartComponentCleanup` |
+| `recycleBin` | Empties the user's Recycle Bin. It always runs before the other categories, so it never empties what the same cleanup just recycled |
 
 Targets with `"admin": true` run in the elevated helper. Targets with `notInstalled` apply only while none of the listed programs is installed.
 
@@ -207,7 +209,7 @@ Planned:
 - [x] Multiple languages, starting with English
 - [ ] Support for more CPU and GPU vendors (NVIDIA and Intel shader caches, vendor tools)
 - [ ] Support for more laptop vendors' performance modes (ASUS, MSI, Dell, HP, Acer…)
-- [ ] Deeper cleanup and optimization that stays safe and customizable
+- [x] Deeper cleanup and optimization that stays safe and customizable
 - [ ] More features in general
 
 Ideas:

@@ -405,6 +405,13 @@ impl Texts {
         }
     }
 
+    pub fn could_not_empty_recycle_bin(&self, code: i32) -> String {
+        match self.language {
+            Language::PtBr => format!("não foi possível esvaziar a Lixeira (0x{:08X})", code as u32),
+            Language::En => format!("could not empty the Recycle Bin (0x{:08X})", code as u32),
+        }
+    }
+
     pub fn could_not_clean(&self, error: &str) -> String {
         match self.language {
             Language::PtBr => format!("não foi possível limpar: {error}"),

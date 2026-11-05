@@ -48,8 +48,9 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::UI::Shell::{
     FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING,
     FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures,
-    FOLDERID_Videos, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SHFILEOPSTRUCTW, SHFileOperationW,
-    SHGetKnownFolderPath, ShellExecuteExW, ShellExecuteW,
+    FOLDERID_Videos, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI,
+    SHERB_NOSOUND, SHEmptyRecycleBinW, SHFILEOPSTRUCTW, SHFileOperationW, SHGetKnownFolderPath, SHQUERYRBINFO,
+    SHQueryRecycleBinW, ShellExecuteExW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GW_OWNER, GetWindow, GetWindowTextLengthW, GetWindowTextW,
@@ -570,6 +571,25 @@ pub fn send_to_recycle_bin(path: &Path) -> Result<(), RecycleError> {
         (0, 0) => Ok(()),
         (0, _) => Err(RecycleError::Declined),
         (code, _) => Err(RecycleError::Failed(code)),
+    }
+}
+
+/// Size of the current user's Recycle Bin on every drive.
+pub fn recycle_bin_size() -> u64 {
+    let mut info: SHQUERYRBINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<SHQUERYRBINFO>() as u32;
+    match unsafe { SHQueryRecycleBinW(std::ptr::null(), &mut info) } {
+        0 => info.i64Size.max(0) as u64,
+        _ => 0,
+    }
+}
+
+/// Empties the current user's Recycle Bin on every drive, without asking; returns the HRESULT on failure.
+pub fn empty_recycle_bin() -> Result<(), i32> {
+    let flags = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND;
+    match unsafe { SHEmptyRecycleBinW(std::ptr::null_mut(), std::ptr::null(), flags) } {
+        0 => Ok(()),
+        code => Err(code),
     }
 }
 

@@ -120,6 +120,31 @@
       ]
     },
     {
+      "id": "brave",
+      "name": { "pt-BR": "Brave", "en": "Brave" },
+      "description": { "pt-BR": "Cache de sites e de componentes. Não desconecta de nenhuma conta.", "en": "Website and component cache. It does not sign you out of any account." },
+      "group": "programs",
+      "blockedBy": [{ "process": "brave", "name": "Brave" }],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Code Cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\GPUCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Service Worker\\CacheStorage", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\ShaderCache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\GrShaderCache", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "firefox",
+      "name": { "pt-BR": "Mozilla Firefox", "en": "Mozilla Firefox" },
+      "description": { "pt-BR": "Cache de sites. Não desconecta de nenhuma conta.", "en": "Website cache. It does not sign you out of any account." },
+      "group": "programs",
+      "blockedBy": [{ "process": "firefox", "name": "Mozilla Firefox" }],
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\Mozilla\\Firefox\\Profiles\\*\\cache2", "mode": "contents" }
+      ]
+    },
+    {
       "id": "steam",
       "name": { "pt-BR": "Steam", "en": "Steam" },
       "description": { "pt-BR": "Cache da loja, logs e relatórios de falha.", "en": "Store cache, logs and crash reports." },
@@ -154,11 +179,27 @@
     {
       "id": "discord",
       "name": { "pt-BR": "Discord", "en": "Discord" },
-      "description": { "pt-BR": "Instaladores de versões antigas.", "en": "Installers of old versions." },
+      "description": { "pt-BR": "Cache do app e instaladores de versões antigas.", "en": "App cache and installers of old versions." },
       "group": "programs",
       "blockedBy": [{ "process": "Discord", "name": "Discord" }],
       "targets": [
-        { "path": "%LOCALAPPDATA%\\Discord\\packages", "mode": "allButNewest", "pattern": "*.nupkg" }
+        { "path": "%LOCALAPPDATA%\\Discord\\packages", "mode": "allButNewest", "pattern": "*.nupkg" },
+        { "path": "%APPDATA%\\discord\\Cache", "mode": "contents" },
+        { "path": "%APPDATA%\\discord\\Code Cache", "mode": "contents" },
+        { "path": "%APPDATA%\\discord\\GPUCache", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "dev-caches",
+      "name": { "pt-BR": "Caches de desenvolvimento", "en": "Developer caches" },
+      "description": { "pt-BR": "Pacotes baixados por npm, pip e Yarn. Eles são baixados de novo quando um projeto precisar.", "en": "Packages downloaded by npm, pip and Yarn. They are downloaded again when a project needs them." },
+      "group": "programs",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\npm-cache\\_cacache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\npm-cache\\_logs", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\pip\\cache", "mode": "contents" },
+        { "path": "%LOCALAPPDATA%\\Yarn\\Cache", "mode": "contents" }
       ]
     },
     {
@@ -197,6 +238,16 @@
       ]
     },
     {
+      "id": "recycle-bin",
+      "name": { "pt-BR": "Lixeira", "en": "Recycle Bin" },
+      "description": { "pt-BR": "Arquivos que você apagou e ainda estão na Lixeira. Depois de esvaziada, não dá para recuperá-los.", "en": "Files you deleted that are still in the Recycle Bin. Once it is emptied, they cannot be recovered." },
+      "group": "caution",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "", "mode": "recycleBin" }
+      ]
+    },
+    {
       "id": "chrome-ai-model",
       "name": { "pt-BR": "Modelo de IA do Chrome", "en": "Chrome AI model" },
       "description": { "pt-BR": "Modelo que o Chrome usa em recursos de IA locais. Ele é baixado de novo se algum recurso precisar.", "en": "Model that Chrome uses for on-device AI features. It is downloaded again if a feature needs it." },
@@ -218,6 +269,16 @@
         { "path": "%LOCALAPPDATA%\\AMD\\DxcCache", "mode": "contents" },
         { "path": "%LOCALAPPDATA%\\AMD\\VkCache", "mode": "contents" },
         { "path": "%LOCALAPPDATA%\\AMD\\GLCache", "mode": "contents" }
+      ]
+    },
+    {
+      "id": "directx-shaders",
+      "name": { "pt-BR": "Cache de shaders do DirectX", "en": "DirectX shader cache" },
+      "description": { "pt-BR": "Shaders que o Windows guarda para os jogos. Eles são recompilados depois e os jogos podem travar nas primeiras partidas.", "en": "Shaders Windows keeps for games. They are compiled again and games may stutter in the first matches." },
+      "group": "caution",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\D3DSCache", "mode": "contents" }
       ]
     },
     {

@@ -86,6 +86,11 @@ impl Category {
         self.group != Group::Caution
     }
 
+    /// Emptying the Recycle Bin runs before anything else, so it never takes what this same cleanup just recycled.
+    pub fn empties_recycle_bin(&self) -> bool {
+        self.targets.iter().any(|t| t.mode == Mode::RecycleBin)
+    }
+
     /// Whether removals of this category may go to the Recycle Bin: leftovers and caution items, which may hold user data.
     pub fn recycles_removals(&self) -> bool {
         matches!(self.group, Group::Leftovers | Group::Caution)
@@ -131,6 +136,7 @@ pub enum Mode {
     WindowsUpdate,
     DeliveryOptimization,
     ComponentStore,
+    RecycleBin,
 }
 
 /// The catalog embedded in the executable. The elevated helper only ever uses this one.
@@ -497,6 +503,7 @@ enum Operation {
     WindowsUpdate(PathBuf),
     DeliveryOptimization(PathBuf),
     ComponentStore,
+    RecycleBin,
 }
 
 fn file_name_of(path: &Path) -> String {
@@ -659,6 +666,7 @@ fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<Detail>) {
         Mode::WindowsUpdate => (valid_paths(rules, paths(), false).into_iter().map(Operation::WindowsUpdate).collect(), Vec::new()),
         Mode::DeliveryOptimization => (valid_paths(rules, paths(), false).into_iter().map(Operation::DeliveryOptimization).collect(), Vec::new()),
         Mode::ComponentStore => (vec![Operation::ComponentStore], Vec::new()),
+        Mode::RecycleBin => (vec![Operation::RecycleBin], Vec::new()),
     }
 }
 
@@ -667,6 +675,7 @@ fn measure(operation: &Operation) -> Option<Tally> {
         Operation::Contents { path, age_hours, exclude } => Some(sweep(path, *age_hours, exclude, false, false)),
         Operation::Remove(p) | Operation::WindowsUpdate(p) | Operation::DeliveryOptimization(p) => Some(sweep(p, 0, &[], false, false)),
         Operation::ComponentStore => None,
+        Operation::RecycleBin => Some(Tally { bytes: system::recycle_bin_size(), ..Default::default() }),
     }
 }
 
@@ -708,6 +717,13 @@ fn execute(operation: &Operation, recycle_removals: bool, texts: &Texts) -> Resu
             let after = system::free_space("C:\\").unwrap_or(0);
             Ok(Tally { bytes: after.saturating_sub(before), ..Default::default() })
         }
+        Operation::RecycleBin => match system::recycle_bin_size() {
+            0 => Ok(Tally::default()),
+            size => {
+                system::empty_recycle_bin().map_err(|code| texts.could_not_empty_recycle_bin(code))?;
+                Ok(Tally { bytes: size, ..Default::default() })
+            }
+        },
     }
 }
 
@@ -834,8 +850,10 @@ pub fn clean(ids: &[String], elevated: bool, recycle_folders: bool, texts: &Text
         true => builtin_catalog(),
         false => catalog(),
     };
-    ids.iter()
-        .filter_map(|id| catalog.categories.iter().find(|c| &c.id == id))
+    let mut chosen: Vec<&Category> = ids.iter().filter_map(|id| catalog.categories.iter().find(|c| &c.id == id)).collect();
+    chosen.sort_by_key(|c| !c.empties_recycle_bin());
+    chosen
+        .into_iter()
         .filter(|c| c.targets.iter().any(|t| t.admin == elevated))
         .map(|category| {
             progress(category.name.get(texts.language));
