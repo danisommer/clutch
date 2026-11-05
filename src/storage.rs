@@ -1,5 +1,6 @@
 //! Settings, history and the Game Mode session, stored as JSON in %LOCALAPPDATA%\ModoJogoLimpeza.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -59,6 +60,7 @@ pub struct Config {
     pub reopen_on_exit: bool,
     pub theme: ThemeChoice,
     pub language: LanguageChoice,
+    pub cleanup_choices: HashMap<String, bool>,
 }
 
 impl Default for Config {
@@ -82,6 +84,7 @@ impl Default for Config {
             reopen_on_exit: true,
             theme: ThemeChoice::System,
             language: LanguageChoice::System,
+            cleanup_choices: HashMap::new(),
         }
     }
 }

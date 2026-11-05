@@ -40,7 +40,8 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
   - Windows temp files, Windows Update downloads, Delivery Optimization, crash dumps and the component store;
   - caches and logs of Chrome, Edge, VS Code, Steam, Epic, Ubisoft, EA, Riot, Discord, Logitech G HUB and AMD driver installers;
   - leftovers of uninstalled programs.
-- **Caution group**: categories that can cost you something are tagged and never preselected. Examples are AMD shader caches, folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
+- **Remembered selection**: what you check is remembered when you clean, and the next analysis starts the same way. Settings has a link to go back to the defaults.
+- **Caution group**: categories that can cost you something are tagged and never preselected, not even after you cleaned them once. Examples are AMD shader caches, folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
 - **Elevation only when needed**: administrator rights are requested only for system items. That means one optional prompt to measure them and one prompt to clean them, and only when a selected category has any.
 - **Running programs block their category**: if Chrome is open, its cache is skipped and you can close it from the app.
 

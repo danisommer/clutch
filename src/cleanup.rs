@@ -52,6 +52,20 @@ fn default_true() -> bool {
     true
 }
 
+impl Category {
+    /// Whether the category starts checked: the user's last choice, else the catalog default. Caution items always start unchecked.
+    pub fn initially_selected(&self, choices: &HashMap<String, bool>) -> bool {
+        match self.group {
+            Group::Caution => false,
+            _ => choices.get(&self.id).copied().unwrap_or(self.selected_by_default),
+        }
+    }
+
+    pub fn remembers_choice(&self) -> bool {
+        self.group != Group::Caution
+    }
+}
+
 /// A program that must be closed before its category can be cleaned.
 #[derive(Clone, Debug, Deserialize)]
 pub struct BlockingProgram {

@@ -271,6 +271,7 @@ impl App {
     fn analyze(&mut self, ctx: &egui::Context) {
         self.cleanup_phase = CleanupPhase::Analyzing;
         self.cleanup_warning = None;
+        self.catalog = cleanup::catalog();
         let t = self.t;
         self.spawn_task(ctx, move |tx, ctx| {
             let progress = |name: &str| {
@@ -290,8 +291,20 @@ impl App {
         });
     }
 
+    /// Remembers which analyzed categories were checked, so the next analysis starts the same way.
+    fn remember_selection(&mut self) {
+        for analysis in self.analyses.iter().filter(|a| a.blockers.is_empty()) {
+            let remembers = self.catalog.categories.iter().find(|c| c.id == analysis.id).is_some_and(|c| c.remembers_choice());
+            if remembers {
+                self.config.cleanup_choices.insert(analysis.id.clone(), self.selection.contains(&analysis.id));
+            }
+        }
+        self.save_config();
+    }
+
     /// Cleans the user targets in this process, then the system targets through one elevated run.
     fn clean(&mut self, ctx: &egui::Context) {
+        self.remember_selection();
         self.cleanup_phase = CleanupPhase::Cleaning;
         self.cleanup_warning = None;
         let t = self.t;
@@ -394,7 +407,13 @@ impl App {
                 Message::CleanupProgress(name) => self.cleanup_progress = name,
                 Message::Analyzed(analyses) => {
                     self.analyses = analyses.into_iter().filter(Analysis::has_content).collect();
-                    let preselected: HashSet<String> = self.catalog.categories.iter().filter(|c| c.selected_by_default).map(|c| c.id.clone()).collect();
+                    let preselected: HashSet<String> = self
+                        .catalog
+                        .categories
+                        .iter()
+                        .filter(|c| c.initially_selected(&self.config.cleanup_choices))
+                        .map(|c| c.id.clone())
+                        .collect();
                     self.selection = self.analyses.iter().filter(|a| preselected.contains(&a.id) && a.blockers.is_empty()).map(|a| a.id.clone()).collect();
                     self.cleanup_phase = CleanupPhase::Analyzed;
                 }
@@ -901,6 +920,23 @@ impl App {
                 self.refresh_overview(ctx);
             }
         }
+        ui.add_space(22.0);
+        section_label(ui, t.cleanup);
+        rule(ui);
+        ui.add_space(8.0);
+        self.cleanup_settings(ui);
+    }
+
+    fn cleanup_settings(&mut self, ui: &mut Ui) {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        ui.horizontal_wrapped(|ui| {
+            ui.label(text(t.selection_remembered, regular(13.0), pal.text_muted));
+            if !self.config.cleanup_choices.is_empty() && link(ui, t.reset_selection, pal.accent_text).clicked() {
+                self.config.cleanup_choices.clear();
+                self.save_config();
+            }
+        });
     }
 
     /// When the watcher ends the session while the window is open, shows the summary it left.

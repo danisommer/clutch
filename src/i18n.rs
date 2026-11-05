@@ -186,6 +186,8 @@ pub struct Texts {
     pub theme_light: &'static str,
     pub theme_dark: &'static str,
     pub language_section: &'static str,
+    pub selection_remembered: &'static str,
+    pub reset_selection: &'static str,
 }
 
 impl Texts {
@@ -556,6 +558,8 @@ pub static PT_BR: Texts = Texts {
     theme_light: "Claro",
     theme_dark: "Escuro",
     language_section: "Idioma",
+    selection_remembered: "A limpeza lembra o que você marcou da última vez. Itens de Atenção sempre começam desmarcados.",
+    reset_selection: "Voltar à seleção padrão",
 };
 
 pub static EN: Texts = Texts {
@@ -678,6 +682,8 @@ pub static EN: Texts = Texts {
     theme_light: "Light",
     theme_dark: "Dark",
     language_section: "Language",
+    selection_remembered: "Cleanup remembers what you checked last time. Caution items always start unchecked.",
+    reset_selection: "Back to the default selection",
 };
 
 #[cfg(test)]
