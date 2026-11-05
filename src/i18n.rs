@@ -60,6 +60,7 @@ impl LocalizedText {
         }
     }
 
+    #[cfg(test)]
     pub fn is_translated(&self) -> bool {
         matches!(self, LocalizedText::Translated { .. })
     }
