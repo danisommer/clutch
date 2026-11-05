@@ -195,7 +195,7 @@ impl App {
 
     fn refresh_overview(&mut self, ctx: &egui::Context) {
         self.loading_overview = true;
-        let config = self.config.clone();
+        let config = self.config.effective();
         let t = self.t;
         self.spawn_task(ctx, move |tx, _| {
             let items = game_mode::overview(&config, t);
@@ -271,7 +271,7 @@ impl App {
     fn activate(&mut self, ctx: &egui::Context) {
         self.game_phase = GamePhase::Activating;
         self.game_progress = self.t.step_preparing.into();
-        let config = self.config.clone();
+        let config = self.config.effective();
         let t = self.t;
         let game = config.game.as_ref().and_then(|chosen| self.games.iter().find(|g| g.is(chosen)).cloned());
         self.spawn_task(ctx, move |tx, ctx| {
@@ -566,6 +566,7 @@ impl App {
             Some(GameAction::PickGame) => self.pick_game(ctx),
             Some(GameAction::RemoveCustomGame(exe)) => {
                 self.config.custom_games.retain(|g| g.exe != exe);
+                self.config.profiles.retain(|p| !(p.launcher == Launcher::Custom && p.id == exe));
                 if self.config.game.as_ref().is_some_and(|g| g.launcher == Launcher::Custom && g.id == exe) {
                     self.config.game = None;
                 }
@@ -606,6 +607,9 @@ impl App {
         let right = width - left - 48.0;
         let height = ui.available_height() - 80.0;
         let mut changed = false;
+        let effective = self.config.effective();
+        let profile_game = self.config.game.as_ref().map(|g| g.name.clone());
+        let has_profile = self.config.has_profile();
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.set_width(left);
@@ -641,10 +645,18 @@ impl App {
                     section_label(ui, t.close_programs_section);
                     rule(ui);
                     ui.add_space(8.0);
+                    if let Some(name) = profile_game.as_deref().filter(|_| has_profile) {
+                        ui.add(egui::Label::new(text(t.profile_applies_to(name), semibold(12.5), pal.accent_text)).wrap());
+                        ui.add_space(4.0);
+                    }
                     let mut remove = None;
-                    for (index, program) in self.config.programs.iter_mut().enumerate() {
+                    for (index, program) in effective.programs.iter().enumerate() {
                         ui.horizontal(|ui| {
-                            changed |= checkbox(ui, &mut program.enabled, &program.name, true).changed();
+                            let mut closes = program.enabled;
+                            if checkbox(ui, &mut closes, &program.name, true).changed() {
+                                self.config.set_closes(index, closes);
+                                changed = true;
+                            }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if link(ui, t.remove, pal.text_faint).clicked() {
                                     remove = Some(index);
@@ -679,8 +691,16 @@ impl App {
                     section_label(ui, t.system_section);
                     rule(ui);
                     ui.add_space(8.0);
-                    changed |= checkbox(ui, &mut self.config.shutdown_wsl, t.shutdown_wsl, true).changed();
-                    changed |= checkbox(ui, &mut self.config.best_performance, t.best_performance, true).changed();
+                    let mut shutdown_wsl = effective.shutdown_wsl;
+                    if checkbox(ui, &mut shutdown_wsl, t.shutdown_wsl, true).changed() {
+                        self.config.set_shutdown_wsl(shutdown_wsl);
+                        changed = true;
+                    }
+                    let mut best_performance = effective.best_performance;
+                    if checkbox(ui, &mut best_performance, t.best_performance, true).changed() {
+                        self.config.set_best_performance(best_performance);
+                        changed = true;
+                    }
                     changed |= checkbox(ui, &mut self.config.reopen_on_exit, t.reopen_on_exit, true).changed();
                     ui.add_space(22.0);
                     section_label(ui, t.launch_game_section);
@@ -709,6 +729,17 @@ impl App {
                     ui.add_space(4.0);
                     if link(ui, t.add_game_exe, pal.accent_text).clicked() {
                         action = Some(GameAction::PickGame);
+                    }
+                    if let Some(name) = &profile_game {
+                        ui.add_space(14.0);
+                        let mut own = has_profile;
+                        if checkbox(ui, &mut own, &t.use_own_settings(name), true).changed() {
+                            match own {
+                                true => self.config.create_game_profile(),
+                                false => self.config.remove_game_profile(),
+                            }
+                            changed = true;
+                        }
                     }
                 });
             });

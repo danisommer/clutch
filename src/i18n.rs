@@ -271,6 +271,20 @@ impl Texts {
         }
     }
 
+    pub fn use_own_settings(&self, game: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Usar configurações próprias para {game}"),
+            Language::En => format!("Use separate settings for {game}"),
+        }
+    }
+
+    pub fn profile_applies_to(&self, game: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Estas opções valem só para {game}."),
+            Language::En => format!("These options only apply to {game}."),
+        }
+    }
+
     pub fn launcher_name(&self, launcher: Launcher) -> &'static str {
         match (self.language, launcher) {
             (_, Launcher::Steam) => "Steam",

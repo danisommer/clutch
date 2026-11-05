@@ -48,6 +48,16 @@ pub struct ChosenGame {
     pub name: String,
 }
 
+/// Game Mode settings that one game keeps for itself instead of using the general ones.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GameProfile {
+    pub launcher: Launcher,
+    pub id: String,
+    pub keep_open: Vec<String>,
+    pub shutdown_wsl: bool,
+    pub best_performance: bool,
+}
+
 /// A game added by picking its executable.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CustomGame {
@@ -84,6 +94,7 @@ pub struct Config {
     pub cleanup_choices: HashMap<String, bool>,
     pub recycle_folders: bool,
     pub custom_games: Vec<CustomGame>,
+    pub profiles: Vec<GameProfile>,
 }
 
 impl Default for Config {
@@ -110,6 +121,81 @@ impl Default for Config {
             cleanup_choices: HashMap::new(),
             recycle_folders: false,
             custom_games: Vec::new(),
+            profiles: Vec::new(),
+        }
+    }
+}
+
+impl Config {
+    fn profile_index(&self) -> Option<usize> {
+        let game = self.game.as_ref()?;
+        self.profiles.iter().position(|p| p.launcher == game.launcher && p.id == game.id)
+    }
+
+    pub fn has_profile(&self) -> bool {
+        self.profile_index().is_some()
+    }
+
+    /// The settings Game Mode uses: the chosen game's profile when it has one, otherwise the general ones.
+    pub fn effective(&self) -> Config {
+        let mut config = self.clone();
+        if let Some(profile) = self.profile_index().map(|i| &self.profiles[i]) {
+            for program in &mut config.programs {
+                program.enabled = !profile.keep_open.contains(&program.name);
+            }
+            config.shutdown_wsl = profile.shutdown_wsl;
+            config.best_performance = profile.best_performance;
+        }
+        config
+    }
+
+    /// Whether the program at `index` is closed, in the chosen game's profile or in the general settings.
+    pub fn set_closes(&mut self, index: usize, closes: bool) {
+        let name = self.programs[index].name.clone();
+        match self.profile_index() {
+            Some(p) => {
+                let keep_open = &mut self.profiles[p].keep_open;
+                keep_open.retain(|n| n != &name);
+                if !closes {
+                    keep_open.push(name);
+                }
+            }
+            None => self.programs[index].enabled = closes,
+        }
+    }
+
+    pub fn set_shutdown_wsl(&mut self, value: bool) {
+        match self.profile_index() {
+            Some(p) => self.profiles[p].shutdown_wsl = value,
+            None => self.shutdown_wsl = value,
+        }
+    }
+
+    pub fn set_best_performance(&mut self, value: bool) {
+        match self.profile_index() {
+            Some(p) => self.profiles[p].best_performance = value,
+            None => self.best_performance = value,
+        }
+    }
+
+    /// Gives the chosen game a profile that starts as a copy of the current settings.
+    pub fn create_game_profile(&mut self) {
+        let current = self.effective();
+        let Some(game) = current.game.as_ref() else { return };
+        self.remove_game_profile();
+        self.profiles.push(GameProfile {
+            launcher: game.launcher,
+            id: game.id.clone(),
+            keep_open: current.programs.iter().filter(|p| !p.enabled).map(|p| p.name.clone()).collect(),
+            shutdown_wsl: current.shutdown_wsl,
+            best_performance: current.best_performance,
+        });
+    }
+
+    /// Makes the chosen game use the general settings again.
+    pub fn remove_game_profile(&mut self) {
+        if let Some(index) = self.profile_index() {
+            self.profiles.remove(index);
         }
     }
 }
