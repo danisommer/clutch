@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::games::Game;
 use crate::i18n::Texts;
-use crate::storage::{self, ChosenGame, ClosedProgram, Config, Force, HistoryKind, ProgramConfig, Session, Summary};
-use crate::steam;
+use crate::storage::{self, ClosedProgram, Config, Force, HistoryKind, ProgramConfig, Session, Summary};
 use crate::system;
 
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -327,7 +327,7 @@ fn shutdown_wsl_if_idle(t: &Texts, items: &mut Vec<Item>) {
 }
 
 /// Closes programs, shuts down WSL, sets the power mode, launches the chosen game and saves the session.
-pub fn activate(config: &Config, game: Option<&steam::Manifest>, t: &Texts, progress: &dyn Fn(&str)) -> Activation {
+pub fn activate(config: &Config, game: Option<&Game>, t: &Texts, progress: &dyn Fn(&str)) -> Activation {
     let mut items = Vec::new();
     let previous = system::chosen_power_mode();
 
@@ -353,10 +353,9 @@ pub fn activate(config: &Config, game: Option<&steam::Manifest>, t: &Texts, prog
 
     if let Some(g) = game {
         progress(t.step_game);
-        let launched = system::shell_open(&format!("steam://rungameid/{}", g.app_id));
-        items.push(match launched {
+        items.push(match g.start() {
             true => Item::ok(t.game, &g.name),
-            false => Item::warning(t.game, &g.name, t.could_not_launch_steam),
+            false => Item::warning(t.game, &g.name, t.could_not_launch(g.launcher)),
         });
     }
 
@@ -364,7 +363,7 @@ pub fn activate(config: &Config, game: Option<&steam::Manifest>, t: &Texts, prog
         started_at: storage::now_epoch(),
         previous_power_mode: previous.filter(|_| power_changed).map(|g| system::guid_to_string(&g)),
         closed_programs: closed.iter().filter(|c| c.closed() && c.had_window).map(|c| c.record.clone()).collect(),
-        game: game.map(|g| ChosenGame { app_id: g.app_id.clone(), name: g.name.clone() }),
+        game: game.map(Game::chosen),
         game_folder: game.map(|g| g.install_dir.to_string_lossy().to_string()),
     };
     let _ = storage::save_session(&session);
@@ -455,8 +454,8 @@ mod tests {
         for item in overview(&Config::default(), &PT_BR) {
             println!("{:<30} {:<40} {:?} {}", item.label, item.value, item.status, item.hint.unwrap_or_default());
         }
-        for game in steam::games() {
-            println!("game: {} ({}) at {}", game.name, game.app_id, game.install_dir.display());
+        for game in crate::games::installed(&Config::default()) {
+            println!("game: {} ({:?} {}) at {}", game.name, game.launcher, game.id, game.install_dir.display());
         }
         for (process, title) in programs_to_add(&Config::default()) {
             println!("can add: {process} — {title}");

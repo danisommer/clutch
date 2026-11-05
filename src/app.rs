@@ -17,11 +17,13 @@ use crate::admin;
 use crate::cleanup::{self, Analysis, Catalog, Category, CleanupResult, Group};
 use crate::game_mode::{self, Item, Status};
 use crate::i18n::{self, Texts};
+use crate::games::{self, Game};
 use crate::storage::{
-    self, ChosenGame, Config, Force, HistoryEntry, HistoryKind, LanguageChoice, ProgramConfig, Session, Summary, ThemeChoice,
+    self, ChosenGame, Config, CustomGame, Force, HistoryEntry, HistoryKind, LanguageChoice, Launcher, ProgramConfig, Session, Summary,
+    ThemeChoice,
 };
 use crate::theme::{self, *};
-use crate::{steam, system, watcher};
+use crate::{system, watcher};
 
 const NAV_WIDTH: f32 = 252.0;
 const TITLE_BAR_HEIGHT: f32 = 40.0;
@@ -58,7 +60,8 @@ enum CleanupPhase {
 }
 
 enum Message {
-    Overview { items: Vec<Item>, games: Vec<steam::Manifest> },
+    Overview { items: Vec<Item>, games: Vec<Game> },
+    GamePicked(PathBuf),
     Candidates(Vec<(String, String)>),
     GameProgress(String),
     Activated(game_mode::Activation),
@@ -74,6 +77,8 @@ enum Message {
 
 enum GameAction {
     Refresh,
+    PickGame,
+    RemoveCustomGame(String),
     FindCandidates,
     Add(String),
     Remove(usize),
@@ -101,7 +106,7 @@ pub struct App {
     game_phase: GamePhase,
     overview_items: Vec<Item>,
     loading_overview: bool,
-    games: Vec<steam::Manifest>,
+    games: Vec<Game>,
     candidates: Option<Vec<(String, String)>>,
     game_progress: String,
     session: Option<Session>,
@@ -194,7 +199,7 @@ impl App {
         let t = self.t;
         self.spawn_task(ctx, move |tx, _| {
             let items = game_mode::overview(&config, t);
-            let games = steam::games();
+            let games = games::installed(&config);
             let _ = tx.send(Message::Overview { items, games });
         });
     }
@@ -204,6 +209,28 @@ impl App {
         self.spawn_task(ctx, move |tx, _| {
             let _ = tx.send(Message::Candidates(game_mode::programs_to_add(&config)));
         });
+    }
+
+    /// Asks for a game executable in the background, so the window keeps drawing while the dialog is open.
+    fn pick_game(&mut self, ctx: &egui::Context) {
+        let t = self.t;
+        self.spawn_task(ctx, move |tx, _| {
+            if let Some(exe) = system::pick_file(t.pick_game_title, t.programs_filter, "*.exe") {
+                let _ = tx.send(Message::GamePicked(exe));
+            }
+        });
+    }
+
+    /// Adds a picked executable to the games, chooses it and lists it with the others.
+    fn add_custom_game(&mut self, ctx: &egui::Context, exe: PathBuf) {
+        let exe_text = exe.to_string_lossy().to_string();
+        let name = exe.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| exe_text.clone());
+        if !self.config.custom_games.iter().any(|g| g.exe.eq_ignore_ascii_case(&exe_text)) {
+            self.config.custom_games.push(CustomGame { name: name.clone(), exe: exe_text.clone() });
+        }
+        self.config.game = Some(ChosenGame { launcher: Launcher::Custom, id: exe_text, name });
+        self.save_config();
+        self.refresh_overview(ctx);
     }
 
     /// Follows the game while the window is open, so the page can show whether it is running.
@@ -246,7 +273,7 @@ impl App {
         self.game_progress = self.t.step_preparing.into();
         let config = self.config.clone();
         let t = self.t;
-        let game = config.game.as_ref().and_then(|g| self.games.iter().find(|m| m.app_id == g.app_id).cloned());
+        let game = config.game.as_ref().and_then(|chosen| self.games.iter().find(|g| g.is(chosen)).cloned());
         self.spawn_task(ctx, move |tx, ctx| {
             let progress = |step: &str| {
                 let _ = tx.send(Message::GameProgress(step.into()));
@@ -380,6 +407,7 @@ impl App {
                     self.loading_overview = false;
                 }
                 Message::Candidates(list) => self.candidates = Some(list),
+                Message::GamePicked(exe) => self.add_custom_game(ctx, exe),
                 Message::GameProgress(step) => self.game_progress = step,
                 Message::Activated(activation) => {
                     let has_warning = activation.items.iter().any(|i| i.status == Status::Warning);
@@ -535,6 +563,15 @@ impl App {
         };
         match action {
             Some(GameAction::Refresh) => self.refresh_overview(ctx),
+            Some(GameAction::PickGame) => self.pick_game(ctx),
+            Some(GameAction::RemoveCustomGame(exe)) => {
+                self.config.custom_games.retain(|g| g.exe != exe);
+                if self.config.game.as_ref().is_some_and(|g| g.launcher == Launcher::Custom && g.id == exe) {
+                    self.config.game = None;
+                }
+                self.save_config();
+                self.refresh_overview(ctx);
+            }
             Some(GameAction::FindCandidates) => self.find_candidates(ctx),
             Some(GameAction::Add(process)) => {
                 self.config.programs.push(ProgramConfig { name: process.clone(), processes: vec![process], force: Force::Never, enabled: true });
@@ -654,11 +691,24 @@ impl App {
                         changed = true;
                     }
                     for game in &self.games {
-                        let chosen = self.config.game.as_ref().is_some_and(|g| g.app_id == game.app_id);
-                        if radio(ui, chosen, &game.name).clicked() {
-                            self.config.game = Some(ChosenGame { app_id: game.app_id.clone(), name: game.name.clone() });
-                            changed = true;
-                        }
+                        let chosen = self.config.game.as_ref().is_some_and(|g| game.is(g));
+                        ui.horizontal(|ui| {
+                            if radio(ui, chosen, &format!("{}  ·  {}", game.name, t.launcher_name(game.launcher))).clicked() {
+                                self.config.game = Some(game.chosen());
+                                changed = true;
+                            }
+                            if game.launcher == Launcher::Custom {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if link(ui, t.remove, pal.text_faint).clicked() {
+                                        action = Some(GameAction::RemoveCustomGame(game.id.clone()));
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    ui.add_space(4.0);
+                    if link(ui, t.add_game_exe, pal.accent_text).clicked() {
+                        action = Some(GameAction::PickGame);
                     }
                 });
             });

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::admin::AdminError;
 use crate::cleanup::{CustomProblem, Group};
-use crate::storage::{HistoryDate, HistoryKind, LanguageChoice, Stamp, Summary, format_duration};
+use crate::storage::{HistoryDate, HistoryKind, LanguageChoice, Launcher, Stamp, Summary, format_duration};
 use crate::system::{self, PowerMode, RecycleError, ServiceError};
 
 const LANG_PORTUGUESE: u16 = 0x16;
@@ -155,7 +155,6 @@ pub struct Texts {
     pub heavy_programs: &'static str,
     pub none_open: &'static str,
     pub game: &'static str,
-    pub could_not_launch_steam: &'static str,
     pub reopened: &'static str,
     pub not_reopened: &'static str,
     pub open_manually: &'static str,
@@ -198,6 +197,9 @@ pub struct Texts {
     pub recycle_folders_hint: &'static str,
     pub custom_rules_hint: &'static str,
     pub open_rules_file: &'static str,
+    pub add_game_exe: &'static str,
+    pub pick_game_title: &'static str,
+    pub programs_filter: &'static str,
 }
 
 impl Texts {
@@ -253,6 +255,29 @@ impl Texts {
             (Language::En, PowerMode::Balanced) => "Balanced",
             (Language::En, PowerMode::BestEfficiency) => "Best power efficiency",
             (Language::En, PowerMode::Unknown) => "unknown",
+        }
+    }
+
+    pub fn could_not_launch(&self, launcher: Launcher) -> &'static str {
+        match (self.language, launcher) {
+            (Language::PtBr, Launcher::Steam) => "não foi possível abrir pela Steam",
+            (Language::PtBr, Launcher::Epic) => "não foi possível abrir pela Epic Games",
+            (Language::PtBr, Launcher::Gog) => "não foi possível abrir o executável do jogo da GOG",
+            (Language::PtBr, Launcher::Custom) => "não foi possível abrir o executável escolhido",
+            (Language::En, Launcher::Steam) => "could not be launched through Steam",
+            (Language::En, Launcher::Epic) => "could not be launched through Epic Games",
+            (Language::En, Launcher::Gog) => "could not start the GOG game executable",
+            (Language::En, Launcher::Custom) => "could not start the chosen executable",
+        }
+    }
+
+    pub fn launcher_name(&self, launcher: Launcher) -> &'static str {
+        match (self.language, launcher) {
+            (_, Launcher::Steam) => "Steam",
+            (_, Launcher::Epic) => "Epic Games",
+            (_, Launcher::Gog) => "GOG",
+            (Language::PtBr, Launcher::Custom) => "executável",
+            (Language::En, Launcher::Custom) => "executable",
         }
     }
 
@@ -589,7 +614,6 @@ pub static PT_BR: Texts = Texts {
     heavy_programs: "Programas pesados",
     none_open: "nenhum aberto",
     game: "Jogo",
-    could_not_launch_steam: "não foi possível abrir pela Steam",
     reopened: "reaberto",
     not_reopened: "não foi reaberto",
     open_manually: "abra manualmente",
@@ -632,6 +656,9 @@ pub static PT_BR: Texts = Texts {
     recycle_folders_hint: "Vale para os grupos Restos e Atenção. O espaço só volta quando a Lixeira for esvaziada.",
     custom_rules_hint: "Categorias suas, no formato do catálogo. Elas passam pelas mesmas regras de segurança e nunca rodam como administrador.",
     open_rules_file: "Abrir arquivo de regras",
+    add_game_exe: "+ Adicionar jogo pelo executável",
+    pick_game_title: "Escolha o executável do jogo",
+    programs_filter: "Programas",
 };
 
 pub static EN: Texts = Texts {
@@ -717,7 +744,6 @@ pub static EN: Texts = Texts {
     heavy_programs: "Heavy programs",
     none_open: "none open",
     game: "Game",
-    could_not_launch_steam: "could not be launched through Steam",
     reopened: "reopened",
     not_reopened: "not reopened",
     open_manually: "open it manually",
@@ -760,6 +786,9 @@ pub static EN: Texts = Texts {
     recycle_folders_hint: "Applies to the Leftovers and Caution groups. The space only comes back when the Recycle Bin is emptied.",
     custom_rules_hint: "Your own categories, in the catalog format. They go through the same safety rules and never run as administrator.",
     open_rules_file: "Open the rules file",
+    add_game_exe: "+ Add a game by its executable",
+    pick_game_title: "Choose the game executable",
+    programs_filter: "Programs",
 };
 
 #[cfg(test)]

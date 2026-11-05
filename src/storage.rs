@@ -28,10 +28,31 @@ pub struct ProgramConfig {
     pub enabled: bool,
 }
 
+/// Where a game comes from. Choices saved before other launchers existed are Steam games.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Launcher {
+    #[default]
+    Steam,
+    Epic,
+    Gog,
+    Custom,
+}
+
+/// The game to launch: its launcher and the launcher's id for it (the executable path for custom games).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ChosenGame {
-    pub app_id: String,
+    #[serde(default)]
+    pub launcher: Launcher,
+    #[serde(alias = "app_id")]
+    pub id: String,
     pub name: String,
+}
+
+/// A game added by picking its executable.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CustomGame {
+    pub name: String,
+    pub exe: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +83,7 @@ pub struct Config {
     pub language: LanguageChoice,
     pub cleanup_choices: HashMap<String, bool>,
     pub recycle_folders: bool,
+    pub custom_games: Vec<CustomGame>,
 }
 
 impl Default for Config {
@@ -87,6 +109,7 @@ impl Default for Config {
             language: LanguageChoice::System,
             cleanup_choices: HashMap::new(),
             recycle_folders: false,
+            custom_games: Vec::new(),
         }
     }
 }

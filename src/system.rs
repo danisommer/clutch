@@ -24,7 +24,9 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
-use windows_sys::Win32::System::Com::CoTaskMemFree;
+use windows_sys::Win32::System::Com::{
+    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
     TH32CS_SNAPPROCESS,
@@ -44,6 +46,10 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcessId, GetExitCodeProcess, INFINITE, OpenProcess,
     PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
     QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
+};
+use windows_sys::Win32::UI::Controls::Dialogs::{
+    GetOpenFileNameW, GetSaveFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST,
+    OPENFILENAMEW,
 };
 use windows_sys::Win32::UI::Shell::{
     FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING,
@@ -463,6 +469,24 @@ pub fn registry_key_exists(local_machine: bool, path: &str) -> bool {
     registry_root(local_machine).open_subkey_with_flags(path, KEY_READ).is_ok()
 }
 
+/// String values of every subkey of a HKLM key, in the 32-bit view, as (subkey name, lowercase value name → data).
+pub fn registry_subkeys_32(path: &str) -> Vec<(String, HashMap<String, String>)> {
+    let flags = KEY_READ | KEY_WOW64_32KEY;
+    let Ok(key) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(path, flags) else { return Vec::new() };
+    key.enum_keys()
+        .flatten()
+        .filter_map(|name| {
+            let sub = key.open_subkey_with_flags(&name, flags).ok()?;
+            let values = sub
+                .enum_values()
+                .flatten()
+                .filter_map(|(value, _)| sub.get_value::<String, _>(&value).ok().map(|data| (value.to_lowercase(), data)))
+                .collect();
+            Some((name, values))
+        })
+        .collect()
+}
+
 /// Display names of installed programs, as listed in Settings > Apps.
 pub fn installed_programs() -> Vec<String> {
     let mut names = Vec::new();
@@ -539,6 +563,53 @@ pub fn wsl_clients(exclude: &HashSet<u32>) -> Vec<String> {
     names
 }
 
+#[derive(Clone, Copy)]
+enum DialogKind {
+    Open,
+    Save,
+}
+
+/// Shows the standard Windows file dialog and waits for the answer. Call it from a background thread.
+fn file_dialog(kind: DialogKind, title: &str, filter_name: &str, pattern: &str, default_name: &str, extension: &str) -> Option<PathBuf> {
+    let initialized = unsafe { CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) } >= 0;
+    let mut buffer: Vec<u16> = default_name.encode_utf16().collect();
+    buffer.resize(1024, 0);
+    let filter: Vec<u16> = format!("{filter_name}\0{pattern}\0\0").encode_utf16().collect();
+    let title = wide(title);
+    let extension = wide(extension);
+    let mut dialog: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+    dialog.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+    dialog.lpstrFilter = filter.as_ptr();
+    dialog.lpstrFile = buffer.as_mut_ptr();
+    dialog.nMaxFile = buffer.len() as u32;
+    dialog.lpstrTitle = title.as_ptr();
+    let result = match kind {
+        DialogKind::Open => {
+            dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+            unsafe { GetOpenFileNameW(&mut dialog) }
+        }
+        DialogKind::Save => {
+            dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+            dialog.lpstrDefExt = extension.as_ptr();
+            unsafe { GetSaveFileNameW(&mut dialog) }
+        }
+    };
+    if initialized {
+        unsafe { CoUninitialize() };
+    }
+    (result != 0).then(|| PathBuf::from(from_wide(&buffer)))
+}
+
+/// Asks the user for an existing file matching `pattern`, such as "*.exe".
+pub fn pick_file(title: &str, filter_name: &str, pattern: &str) -> Option<PathBuf> {
+    file_dialog(DialogKind::Open, title, filter_name, pattern, "", "")
+}
+
+/// Asks the user where to save a file, suggesting `default_name`.
+pub fn choose_save_path(title: &str, filter_name: &str, pattern: &str, default_name: &str, extension: &str) -> Option<PathBuf> {
+    file_dialog(DialogKind::Save, title, filter_name, pattern, default_name, extension)
+}
+
 /// Opens a text file in Notepad, which every Windows has, so it can be edited whatever the file associations are.
 pub fn open_in_notepad(path: &Path) -> bool {
     Command::new("notepad.exe").arg(path).spawn().is_ok()
@@ -548,6 +619,15 @@ pub fn open_in_notepad(path: &Path) -> bool {
 pub fn shell_open(target: &str) -> bool {
     let result = unsafe {
         ShellExecuteW(std::ptr::null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL)
+    };
+    result as isize > 32
+}
+
+/// Starts a program through the Windows shell with `dir` as its working folder, as games expect.
+pub fn shell_open_in(target: &str, dir: &Path) -> bool {
+    let dir = wide(&dir.to_string_lossy());
+    let result = unsafe {
+        ShellExecuteW(std::ptr::null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), std::ptr::null(), dir.as_ptr(), SW_SHOWNORMAL)
     };
     result as isize > 32
 }
