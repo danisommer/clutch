@@ -469,6 +469,8 @@ impl App {
             }
         }
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+            ui.label(text(format!("v{}", env!("CARGO_PKG_VERSION")), regular(11.0), TEXT_FAINT));
+            ui.add_space(14.0);
             if let Some(free) = self.free_space_c {
                 ui.label(text(format!("{} livres", storage::format_size(free)), semibold(18.0), TEXT));
                 ui.label(text("DISCO C:", semibold(10.5), TEXT_MUTED).extra_letter_spacing(1.4));

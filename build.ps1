@@ -5,7 +5,8 @@
     Uses the Rust GNU toolchain (x86_64-pc-windows-gnu), which needs dlltool.exe and as.exe from
     MinGW-w64 binutils. They are taken from -Binutils when that folder exists, otherwise from PATH.
     The folder is added to PATH by its 8.3 short name, because dlltool cannot call as.exe from a
-    path that contains spaces.
+    path that contains spaces. When windres.exe from the same binutils is there too, the icon and the
+    version info are embedded in the executable; without it the build only prints a warning.
 .PARAMETER Debug
     Builds without optimizations and does not install.
 .PARAMETER Shortcut

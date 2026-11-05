@@ -6,6 +6,19 @@
 
 > The interface is currently in Brazilian Portuguese only. Other languages are on the [roadmap](#roadmap).
 
+## Download
+
+Prebuilt executables are on the [Releases](https://github.com/danisommer/modo-jogo-limpeza/releases) page. The app is a single portable `ModoJogoLimpeza.exe`: download it, put it in any folder and run it. Each release also has:
+
+- a `.sha256` file to check the download;
+- a [Scoop](https://scoop.sh) manifest, which installs the app and adds a Start menu shortcut:
+
+  ```powershell
+  scoop install https://github.com/danisommer/modo-jogo-limpeza/releases/latest/download/modo-jogo-limpeza.json
+  ```
+
+The executable is not signed yet, so Windows SmartScreen may warn on the first run. Choose **More info**, then **Run anyway**.
+
 ## Features
 
 ### Game Mode
@@ -73,6 +86,15 @@ rustup default stable-x86_64-pc-windows-gnu
 
 `build.ps1` looks for the binutils in `%USERPROFILE%\.cargo\mingw-as`, or in the folder given with `-Binutils`, and falls back to `PATH`. A plain `cargo build --release` also works when both tools are on `PATH`. The MSVC toolchain has not been tested yet.
 
+The icon and the version info shown in the file's Properties are embedded by [`build.rs`](build.rs). With the GNU toolchain this needs `windres.exe`, from the same binutils, in that folder or on `PATH` (or set `WINDRES` to its path). Without it the build still works and prints a warning.
+
+### Releasing
+
+1. Change `version` in `Cargo.toml`, build once so `Cargo.lock` picks it up, and commit both.
+2. Push a tag with the same version, for example `git tag v0.2.0` and `git push origin v0.2.0`.
+
+The [release workflow](.github/workflows/release.yml) runs the tests, builds with the GNU toolchain, requires the embedded resources, checks that the executable only depends on Windows DLLs and publishes the executable, its SHA-256 and the Scoop manifest.
+
 ### Tests
 
 ```powershell
@@ -129,7 +151,9 @@ src/
   system.rs      Win32 wrappers (processes, windows, power, displays, registry, services)
 categories.json  cleanup catalog
 build.ps1        build and install script
-assets/icon.ico  shortcut icon
+build.rs         embeds the icon and version info in the executable
+assets/icon.ico  executable and shortcut icon
+.github/         release workflow
 ```
 
 ## Status
@@ -140,7 +164,7 @@ This is an early version. The safety rules have unit tests, but the elevated cle
 
 Planned:
 
-- [ ] Downloadable releases (prebuilt executables on GitHub Releases)
+- [x] Downloadable releases (prebuilt executables on GitHub Releases)
 - [ ] Dark mode
 - [ ] Multiple languages, starting with English
 - [ ] Support for more CPU and GPU vendors (NVIDIA and Intel shader caches, vendor tools)
@@ -155,9 +179,11 @@ Ideas:
 - [ ] Per-game profiles (which programs to close, power settings)
 - [ ] Game launch from other launchers (Epic, EA app, Battle.net, Xbox app)
 - [ ] Exportable cleanup report
-- [ ] Executable icon and version info embedded as Windows resources
-- [ ] CI with tests and signed builds
-- [ ] Distribution through winget or Scoop
+- [x] Executable icon and version info embedded as Windows resources
+- [x] CI with tests on every release
+- [ ] Signed builds
+- [x] Distribution through Scoop (manifest in each release)
+- [ ] Distribution through winget
 - [ ] Keyboard navigation and screen reader support
 
 ## License

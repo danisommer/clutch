@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C link-self-contained=yes
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW-w64 binutils
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-binutils
+
+      - name: Put binutils on PATH
+        run: |
+          $bin = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'mingw64\bin'
+          Add-Content $env:GITHUB_PATH $bin
+          Add-Content $env:GITHUB_ENV "WINDRES=$(Join-Path $bin 'windres.exe')"
+
+      - name: Install Rust (GNU toolchain)
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+          rustup default stable-x86_64-pc-windows-gnu
+
+      - name: Check that the tag matches Cargo.toml
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ("v$version" -ne '${{ github.ref_name }}') {
+            throw "Tag ${{ github.ref_name }} does not match version $version in Cargo.toml"
+          }
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
+        env:
+          MJL_REQUIRE_RESOURCES: "1"
+        run: cargo build --release --locked
+
+      - name: Check that the executable only needs Windows DLLs
+        run: |
+          $dlls = objdump -p target\release\modo-jogo-limpeza.exe | Select-String 'DLL Name: (.+)' | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() }
+          $foreign = $dlls | Where-Object { $_ -match '^(libgcc|libwinpthread|libstdc\+\+|vcruntime|msvcp)' }
+          if ($foreign) { throw "Unexpected DLL dependencies: $($foreign -join ', ')" }
+          $dlls
+
+      - name: Package
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $repository = '${{ github.repository }}'
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target\release\modo-jogo-limpeza.exe dist\ModoJogoLimpeza.exe
+          $hash = (Get-FileHash dist\ModoJogoLimpeza.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  ModoJogoLimpeza.exe" | Out-File dist\ModoJogoLimpeza.exe.sha256 -Encoding ascii -NoNewline
+          [ordered]@{
+            version     = $tag.TrimStart('v')
+            description = 'Game Mode and safe storage cleanup for Windows'
+            homepage    = "https://github.com/$repository"
+            license     = 'Proprietary'
+            url         = "https://github.com/$repository/releases/download/$tag/ModoJogoLimpeza.exe"
+            hash        = $hash
+            bin         = 'ModoJogoLimpeza.exe'
+            shortcuts   = @(, @('ModoJogoLimpeza.exe', 'Modo Jogo e Limpeza'))
+          } | ConvertTo-Json -Depth 4 | Out-File dist\modo-jogo-limpeza.json -Encoding utf8NoBOM
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          gh release create $tag dist\ModoJogoLimpeza.exe dist\ModoJogoLimpeza.exe.sha256 dist\modo-jogo-limpeza.json --title $tag --generate-notes
