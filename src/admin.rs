@@ -57,7 +57,7 @@ pub fn run(args: &[String]) -> i32 {
         [_, ARG, "clean", input, output] => {
             let (Some(input), Some(output)) = (inside_exchange_dir(input), inside_exchange_dir(output)) else { return EXIT_BAD_ARGS };
             let Some(request) = read_request(&input) else { return EXIT_BAD_ARGS };
-            let catalog = cleanup::catalog();
+            let catalog = cleanup::builtin_catalog();
             let known: Vec<String> = request.ids.into_iter().filter(|id| catalog.categories.iter().any(|c| &c.id == id)).collect();
             write_result(&output, &cleanup::clean(&known, true, request.recycle_folders, i18n::texts(request.language), &|_| {}))
         }

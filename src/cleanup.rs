@@ -13,23 +13,42 @@ use crate::{steam, storage, system};
 
 const CATALOG: &str = include_str!("../categories.json");
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+const CUSTOM_FILE: &str = "custom-categories.json";
+const CUSTOM_MODES: [Mode; 5] = [Mode::Contents, Mode::Folder, Mode::File, Mode::InactiveFolders, Mode::AllButNewest];
+const CUSTOM_TEMPLATE: &str = r#"{
+  "categories": [
+    {
+      "id": "example-cache",
+      "name": "Example cache",
+      "description": "Replace this example with your own rules. The README explains the format.",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\ExampleApp\\Cache", "mode": "contents", "ageHours": 24 }
+      ]
+    }
+  ]
+}
+"#;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Catalog {
     pub categories: Vec<Category>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+/// Section of the cleanup list. `Custom` holds the user's own rules, which cannot pick another group.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Group {
     System,
     Programs,
     Leftovers,
+    #[default]
+    Custom,
     Caution,
 }
 
 impl Group {
-    pub const ALL: [Group; 4] = [Group::System, Group::Programs, Group::Leftovers, Group::Caution];
+    pub const ALL: [Group; 5] = [Group::System, Group::Programs, Group::Leftovers, Group::Custom, Group::Caution];
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -37,7 +56,9 @@ impl Group {
 pub struct Category {
     pub id: String,
     pub name: LocalizedText,
+    #[serde(default)]
     pub description: LocalizedText,
+    #[serde(default)]
     pub group: Group,
     #[serde(default = "default_true")]
     pub selected_by_default: bool,
@@ -112,8 +133,80 @@ pub enum Mode {
     ComponentStore,
 }
 
-pub fn catalog() -> Catalog {
+/// The catalog embedded in the executable. The elevated helper only ever uses this one.
+pub fn builtin_catalog() -> Catalog {
     serde_json::from_str(CATALOG).expect("categories.json is invalid")
+}
+
+/// The built-in catalog plus the user's valid custom categories.
+pub fn catalog() -> Catalog {
+    let mut catalog = builtin_catalog();
+    let custom = custom_rules(&catalog);
+    catalog.categories.extend(custom.categories);
+    catalog
+}
+
+/// Why a custom rule, or the whole custom file, was ignored.
+#[derive(Clone, Debug)]
+pub enum CustomProblem {
+    Unreadable(String),
+    Invalid(String),
+    DuplicateId(String),
+    NeedsAdmin(String),
+    UnsupportedMode(String),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CustomRules {
+    pub categories: Vec<Category>,
+    pub problems: Vec<CustomProblem>,
+}
+
+pub fn custom_rules_path() -> PathBuf {
+    storage::data_dir().join(CUSTOM_FILE)
+}
+
+/// Reads the user's custom categories; a missing file means no rules.
+pub fn custom_rules(builtin: &Catalog) -> CustomRules {
+    match fs::read_to_string(custom_rules_path()) {
+        Ok(text) => parse_custom_rules(&text, builtin),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => CustomRules::default(),
+        Err(e) => CustomRules { categories: Vec::new(), problems: vec![CustomProblem::Unreadable(e.to_string())] },
+    }
+}
+
+/// Keeps the custom categories that are safe to run without elevation, in the `Custom` group, and reports the others.
+fn parse_custom_rules(text: &str, builtin: &Catalog) -> CustomRules {
+    let parsed: Catalog = match serde_json::from_str(text.trim_start_matches('\u{feff}')) {
+        Ok(parsed) => parsed,
+        Err(e) => return CustomRules { categories: Vec::new(), problems: vec![CustomProblem::Invalid(e.to_string())] },
+    };
+    let mut ids: HashSet<String> = builtin.categories.iter().map(|c| c.id.clone()).collect();
+    let mut rules = CustomRules::default();
+    for mut category in parsed.categories {
+        let duplicate = !ids.insert(category.id.clone());
+        let needs_admin = category.targets.iter().any(|t| t.admin);
+        let supported = category.targets.iter().all(|t| CUSTOM_MODES.contains(&t.mode));
+        match (duplicate, needs_admin, supported) {
+            (true, _, _) => rules.problems.push(CustomProblem::DuplicateId(category.id)),
+            (_, true, _) => rules.problems.push(CustomProblem::NeedsAdmin(category.id)),
+            (_, _, false) => rules.problems.push(CustomProblem::UnsupportedMode(category.id)),
+            (false, false, true) => {
+                category.group = Group::Custom;
+                rules.categories.push(category);
+            }
+        }
+    }
+    rules
+}
+
+/// Creates the custom rules file with an example when it does not exist yet, and returns its path.
+pub fn ensure_custom_rules_file() -> std::io::Result<PathBuf> {
+    let path = custom_rules_path();
+    match path.exists() {
+        true => Ok(path),
+        false => fs::write(&path, CUSTOM_TEMPLATE).map(|()| path),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -706,7 +799,7 @@ pub fn analyze(texts: &Texts, progress: &dyn Fn(&str)) -> Vec<Analysis> {
 pub fn analyze_admin() -> HashMap<String, u64> {
     let rules = Rules::load();
     let installed = installed_lowercase();
-    catalog()
+    builtin_catalog()
         .categories
         .iter()
         .filter(|c| c.targets.iter().any(|t| t.admin))
@@ -737,7 +830,10 @@ pub fn clean(ids: &[String], elevated: bool, recycle_folders: bool, texts: &Text
     let rules = Rules::load();
     let installed = installed_lowercase();
     let processes = system::processes();
-    let catalog = catalog();
+    let catalog = match elevated {
+        true => builtin_catalog(),
+        false => catalog(),
+    };
     ids.iter()
         .filter_map(|id| catalog.categories.iter().find(|c| &c.id == id))
         .filter(|c| c.targets.iter().any(|t| t.admin == elevated))
@@ -861,12 +957,45 @@ mod tests {
 
     #[test]
     fn catalog_is_valid() {
-        let c = catalog();
+        let c = builtin_catalog();
         let ids: HashSet<&str> = c.categories.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids.len(), c.categories.len(), "duplicate ids in the catalog");
         for category in &c.categories {
             assert!(category.name.is_translated() && category.description.is_translated(), "{} needs pt-BR and en texts", category.id);
+            assert_ne!(category.group, Group::Custom, "{} needs an explicit group", category.id);
         }
+    }
+
+    #[test]
+    fn custom_rules_refuse_admin_unsupported_modes_and_duplicates() {
+        let text = r#"{ "categories": [
+            { "id": "mine", "name": "Mine", "group": "system", "targets": [ { "path": "%LOCALAPPDATA%\\Mine\\Cache", "mode": "contents" } ] },
+            { "id": "temp", "name": "Copy", "targets": [ { "path": "%TEMP%", "mode": "contents" } ] },
+            { "id": "root", "name": "Root", "targets": [ { "path": "%WINDIR%\\Temp", "mode": "contents", "admin": true } ] },
+            { "id": "dism", "name": "DISM", "targets": [ { "path": "", "mode": "componentStore" } ] }
+        ] }"#;
+        let rules = parse_custom_rules(text, &builtin_catalog());
+        assert_eq!(rules.categories.len(), 1);
+        assert_eq!(rules.categories[0].id, "mine");
+        assert_eq!(rules.categories[0].group, Group::Custom, "custom rules cannot pick their group");
+        assert!(matches!(
+            rules.problems.as_slice(),
+            [CustomProblem::DuplicateId(a), CustomProblem::NeedsAdmin(b), CustomProblem::UnsupportedMode(c)] if a == "temp" && b == "root" && c == "dism"
+        ));
+    }
+
+    #[test]
+    fn custom_rules_report_invalid_files() {
+        let rules = parse_custom_rules("{ not json", &builtin_catalog());
+        assert!(rules.categories.is_empty());
+        assert!(matches!(rules.problems.as_slice(), [CustomProblem::Invalid(_)]));
+    }
+
+    #[test]
+    fn custom_rules_template_is_valid() {
+        let rules = parse_custom_rules(CUSTOM_TEMPLATE, &builtin_catalog());
+        assert!(rules.problems.is_empty());
+        assert_eq!(rules.categories.len(), 1);
     }
 
     #[test]

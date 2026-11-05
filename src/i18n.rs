@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::admin::AdminError;
-use crate::cleanup::Group;
+use crate::cleanup::{CustomProblem, Group};
 use crate::storage::{HistoryDate, HistoryKind, LanguageChoice, Stamp, Summary, format_duration};
 use crate::system::{self, PowerMode, RecycleError, ServiceError};
 
@@ -62,6 +62,12 @@ impl LocalizedText {
 
     pub fn is_translated(&self) -> bool {
         matches!(self, LocalizedText::Translated { .. })
+    }
+}
+
+impl Default for LocalizedText {
+    fn default() -> Self {
+        LocalizedText::Same(String::new())
     }
 }
 
@@ -190,6 +196,8 @@ pub struct Texts {
     pub reset_selection: &'static str,
     pub recycle_folders: &'static str,
     pub recycle_folders_hint: &'static str,
+    pub custom_rules_hint: &'static str,
+    pub open_rules_file: &'static str,
 }
 
 impl Texts {
@@ -288,11 +296,46 @@ impl Texts {
             (Language::PtBr, Group::System) => "Sistema",
             (Language::PtBr, Group::Programs) => "Programas",
             (Language::PtBr, Group::Leftovers) => "Restos",
+            (Language::PtBr, Group::Custom) => "Suas regras",
             (Language::PtBr, Group::Caution) => "Atenção",
             (Language::En, Group::System) => "System",
             (Language::En, Group::Programs) => "Programs",
             (Language::En, Group::Leftovers) => "Leftovers",
+            (Language::En, Group::Custom) => "Your rules",
             (Language::En, Group::Caution) => "Caution",
+        }
+    }
+
+    pub fn could_not_open(&self, target: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("não foi possível abrir {target}"),
+            Language::En => format!("could not open {target}"),
+        }
+    }
+
+    pub fn custom_rules_count(&self, count: usize) -> String {
+        match (self.language, count) {
+            (Language::PtBr, 0) => "Nenhuma regra personalizada.".to_string(),
+            (Language::PtBr, 1) => "1 regra personalizada carregada.".to_string(),
+            (Language::PtBr, n) => format!("{n} regras personalizadas carregadas."),
+            (Language::En, 0) => "No custom rules.".to_string(),
+            (Language::En, 1) => "1 custom rule loaded.".to_string(),
+            (Language::En, n) => format!("{n} custom rules loaded."),
+        }
+    }
+
+    pub fn custom_problem(&self, problem: &CustomProblem) -> String {
+        match (self.language, problem) {
+            (Language::PtBr, CustomProblem::Unreadable(e)) => format!("não foi possível ler o arquivo: {e}"),
+            (Language::PtBr, CustomProblem::Invalid(e)) => format!("arquivo inválido: {e}"),
+            (Language::PtBr, CustomProblem::DuplicateId(id)) => format!("{id}: já existe uma categoria com esse id"),
+            (Language::PtBr, CustomProblem::NeedsAdmin(id)) => format!("{id}: regras personalizadas não podem usar \"admin\""),
+            (Language::PtBr, CustomProblem::UnsupportedMode(id)) => format!("{id}: modo não permitido em regras personalizadas"),
+            (Language::En, CustomProblem::Unreadable(e)) => format!("could not read the file: {e}"),
+            (Language::En, CustomProblem::Invalid(e)) => format!("invalid file: {e}"),
+            (Language::En, CustomProblem::DuplicateId(id)) => format!("{id}: a category with this id already exists"),
+            (Language::En, CustomProblem::NeedsAdmin(id)) => format!("{id}: custom rules cannot use \"admin\""),
+            (Language::En, CustomProblem::UnsupportedMode(id)) => format!("{id}: this mode is not allowed in custom rules"),
         }
     }
 
@@ -580,6 +623,8 @@ pub static PT_BR: Texts = Texts {
     reset_selection: "Voltar à seleção padrão",
     recycle_folders: "Mandar pastas removidas para a Lixeira",
     recycle_folders_hint: "Vale para os grupos Restos e Atenção. O espaço só volta quando a Lixeira for esvaziada.",
+    custom_rules_hint: "Categorias suas, no formato do catálogo. Elas passam pelas mesmas regras de segurança e nunca rodam como administrador.",
+    open_rules_file: "Abrir arquivo de regras",
 };
 
 pub static EN: Texts = Texts {
@@ -706,6 +751,8 @@ pub static EN: Texts = Texts {
     reset_selection: "Back to the default selection",
     recycle_folders: "Send removed folders to the Recycle Bin",
     recycle_folders_hint: "Applies to the Leftovers and Caution groups. The space only comes back when the Recycle Bin is emptied.",
+    custom_rules_hint: "Your own categories, in the catalog format. They go through the same safety rules and never run as administrator.",
+    open_rules_file: "Open the rules file",
 };
 
 #[cfg(test)]

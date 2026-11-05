@@ -538,6 +538,11 @@ pub fn wsl_clients(exclude: &HashSet<u32>) -> Vec<String> {
     names
 }
 
+/// Opens a text file in Notepad, which every Windows has, so it can be edited whatever the file associations are.
+pub fn open_in_notepad(path: &Path) -> bool {
+    Command::new("notepad.exe").arg(path).spawn().is_ok()
+}
+
 /// Opens a file, program, URL or Store app through the Windows shell.
 pub fn shell_open(target: &str) -> bool {
     let result = unsafe {

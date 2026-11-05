@@ -117,6 +117,8 @@ pub struct App {
     cleanup_warning: Option<String>,
     blocker_items: Vec<Item>,
     history: Vec<HistoryEntry>,
+    custom_rules: cleanup::CustomRules,
+    settings_warning: Option<String>,
     _window_marker: Option<watcher::Marker>,
     close_at: Option<Instant>,
 }
@@ -154,6 +156,8 @@ impl App {
             cleanup_warning: None,
             blocker_items: Vec::new(),
             history: storage::load_history(),
+            custom_rules: cleanup::CustomRules::default(),
+            settings_warning: None,
             _window_marker: watcher::mark_window(),
             close_at: None,
         };
@@ -495,8 +499,10 @@ impl App {
         for (number, page, name) in pages {
             if nav_item(ui, number, name, self.page == page).clicked() {
                 self.page = page;
-                if page == Page::History {
-                    self.history = storage::load_history();
+                match page {
+                    Page::History => self.history = storage::load_history(),
+                    Page::Settings => self.refresh_custom_rules(),
+                    Page::GameMode | Page::Cleanup => {}
                 }
             }
         }
@@ -932,6 +938,21 @@ impl App {
         self.cleanup_settings(ui);
     }
 
+    fn refresh_custom_rules(&mut self) {
+        self.custom_rules = cleanup::custom_rules(&cleanup::builtin_catalog());
+    }
+
+    /// Opens the custom rules in Notepad, creating the file with an example the first time.
+    fn open_custom_rules(&mut self) {
+        let t = self.t;
+        self.settings_warning = match cleanup::ensure_custom_rules_file() {
+            Ok(path) if system::open_in_notepad(&path) => None,
+            Ok(path) => Some(t.could_not_open(&path.display().to_string())),
+            Err(e) => Some(t.could_not_open(&e.to_string())),
+        };
+        self.refresh_custom_rules();
+    }
+
     fn cleanup_settings(&mut self, ui: &mut Ui) {
         let pal = palette(ui.ctx());
         let t = self.t;
@@ -947,6 +968,24 @@ impl App {
                 self.save_config();
             }
         });
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            ui.label(text(t.custom_rules_count(self.custom_rules.categories.len()), semibold(14.0), pal.text));
+            if link(ui, t.refresh, pal.text_muted).clicked() {
+                self.refresh_custom_rules();
+            }
+        });
+        ui.add(egui::Label::new(text(t.custom_rules_hint, regular(12.5), pal.text_muted)).wrap());
+        for problem in &self.custom_rules.problems {
+            ui.add(egui::Label::new(text(t.custom_problem(problem), semibold(12.5), pal.accent_text)).wrap());
+        }
+        if let Some(warning) = &self.settings_warning {
+            ui.add(egui::Label::new(text(warning, semibold(12.5), pal.accent_text)).wrap());
+        }
+        ui.add_space(4.0);
+        if link(ui, t.open_rules_file, pal.accent_text).clicked() {
+            self.open_custom_rules();
+        }
     }
 
     /// When the watcher ends the session while the window is open, shows the summary it left.

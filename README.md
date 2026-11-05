@@ -72,7 +72,7 @@ Deleting files is the riskiest thing this app does, so the rules are enforced in
 - **Age limits**: temporary files must be older than 24 hours.
 - **Files in use** are skipped and counted, never forced.
 - **The elevated helper is the same executable** started with `--admin`:
-  - it only accepts category ids that exist in the built-in catalog;
+  - it only accepts category ids that exist in the built-in catalog, and never reads [custom rules](#custom-rules);
   - it only reads and writes files inside the app's exchange folder.
 
 ## Requirements
@@ -115,6 +115,7 @@ cargo test print_ -- --ignored --nocapture      # read-only diagnostics of this 
 | --- | --- |
 | Program | `%LOCALAPPDATA%\Programs\ModoJogoLimpeza` |
 | Settings, history, current session | `%LOCALAPPDATA%\ModoJogoLimpeza\*.json` |
+| Custom cleanup rules | `%LOCALAPPDATA%\ModoJogoLimpeza\custom-categories.json` |
 | Cleanup catalog | [`categories.json`](categories.json), embedded at build time |
 
 ### Catalog format
@@ -141,6 +142,35 @@ A target's `path` accepts environment variables, `%STEAM%` and `*` wildcards. It
 | `componentStore` | Runs `DISM /Online /Cleanup-Image /StartComponentCleanup` |
 
 Targets with `"admin": true` run in the elevated helper. Targets with `notInstalled` apply only while none of the listed programs is installed.
+
+### Custom rules
+
+Your own categories go in `%LOCALAPPDATA%\ModoJogoLimpeza\custom-categories.json`, in the same format as the catalog. **Settings → Open the rules file** creates it with an example and opens it in Notepad. The rules show up in the Cleanup page under **Your rules** at the next analysis.
+
+```json
+{
+  "categories": [
+    {
+      "id": "my-editor-cache",
+      "name": "My editor cache",
+      "description": "Optional. A single text, or one per language as in the catalog.",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "%LOCALAPPDATA%\\MyEditor\\Cache", "mode": "contents", "ageHours": 24 }
+      ]
+    }
+  ]
+}
+```
+
+Custom rules are held to stricter limits than the catalog, enforced in code:
+
+- they go through the same allowed roots and protected folders;
+- only the `contents`, `folder`, `file`, `inactiveFolders` and `allButNewest` modes are accepted;
+- `"admin": true` is refused, and the elevated helper never reads this file, so nothing written there can run with administrator rights;
+- an `id` that already exists is refused.
+
+Rules that break these limits are skipped and listed in Settings, with the reason.
 
 ## Project layout
 
@@ -183,7 +213,7 @@ Planned:
 Ideas:
 
 - [x] Option to send removed items to the Recycle Bin instead of deleting them
-- [ ] User-defined cleanup rules in a separate file, on top of the built-in catalog
+- [x] User-defined cleanup rules in a separate file, on top of the built-in catalog
 - [ ] Per-game profiles (which programs to close, power settings)
 - [ ] Game launch from other launchers (Epic, EA app, Battle.net, Xbox app)
 - [ ] Exportable cleanup report
