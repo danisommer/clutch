@@ -3,6 +3,7 @@
 mod admin;
 mod app;
 mod cleanup;
+mod debloat;
 mod game_mode;
 mod games;
 mod i18n;

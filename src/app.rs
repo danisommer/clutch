@@ -16,6 +16,7 @@ use eframe::egui::{
 
 use crate::admin;
 use crate::cleanup::{self, Analysis, Catalog, Category, CleanupResult, Group};
+use crate::debloat::{self, ItemState, Section};
 use crate::game_mode::{self, Item, Status};
 use crate::i18n::{self, Texts};
 use crate::games::{self, Game};
@@ -37,6 +38,7 @@ const BRAND_SECOND_LINE: &str = "e Limpeza";
 enum Page {
     GameMode,
     Cleanup,
+    Debloat,
     History,
     Settings,
 }
@@ -48,6 +50,14 @@ enum GamePhase {
     Active,
     Deactivating,
     Finished,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DebloatPhase {
+    Idle,
+    Analyzing,
+    Analyzed,
+    Running,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -75,6 +85,8 @@ enum Message {
     Cleaned { results: Vec<CleanupResult>, warning: Option<String> },
     BlockersClosed(Vec<Item>),
     ReportSaved(Result<PathBuf, String>),
+    DebloatAnalyzed(HashMap<String, ItemState>),
+    DebloatDone { action: debloat::Action, ids: Vec<String>, outcomes: Vec<debloat::Outcome>, warning: Option<String> },
 }
 
 enum GameAction {
@@ -88,6 +100,13 @@ enum GameAction {
     Deactivate,
     Back,
     KeepOpen,
+}
+
+enum DebloatAction {
+    Analyze,
+    Apply,
+    Undo(String),
+    Reinstall(String),
 }
 
 enum CleanupAction {
@@ -128,6 +147,12 @@ pub struct App {
     custom_rules: cleanup::CustomRules,
     settings_warning: Option<String>,
     report_status: Option<Result<PathBuf, String>>,
+    debloat_catalog: debloat::Catalog,
+    debloat_phase: DebloatPhase,
+    debloat_states: HashMap<String, ItemState>,
+    debloat_selection: HashSet<String>,
+    debloat_outcomes: Vec<debloat::Outcome>,
+    debloat_warning: Option<String>,
     _window_marker: Option<watcher::Marker>,
     close_at: Option<Instant>,
 }
@@ -168,6 +193,12 @@ impl App {
             custom_rules: cleanup::CustomRules::default(),
             settings_warning: None,
             report_status: None,
+            debloat_catalog: debloat::catalog(),
+            debloat_phase: DebloatPhase::Idle,
+            debloat_states: HashMap::new(),
+            debloat_selection: HashSet::new(),
+            debloat_outcomes: Vec::new(),
+            debloat_warning: None,
             _window_marker: watcher::mark_window(),
             close_at: None,
         };
@@ -471,6 +502,23 @@ impl App {
                     self.cleanup_phase = CleanupPhase::Analyzed;
                 }
                 Message::ReportSaved(status) => self.report_status = Some(status),
+                Message::DebloatAnalyzed(states) => {
+                    let pending = |id: &String| matches!(states.get(id), Some(ItemState::NotApplied | ItemState::Partial));
+                    self.debloat_selection = match self.debloat_states.is_empty() {
+                        true => self.debloat_catalog.items.iter().filter(|i| i.starts_selected() && pending(&i.id)).map(|i| i.id.clone()).collect(),
+                        false => self.debloat_selection.iter().filter(|id| pending(id)).cloned().collect(),
+                    };
+                    self.debloat_states = states;
+                    self.debloat_phase = DebloatPhase::Analyzed;
+                }
+                Message::DebloatDone { action, ids, outcomes, warning } => {
+                    if action == debloat::Action::Apply {
+                        self.remember_removed_apps(&ids, &outcomes);
+                    }
+                    self.debloat_outcomes = outcomes;
+                    self.debloat_warning = warning;
+                    self.analyze_debloat(ctx);
+                }
                 Message::Cleaned { results, warning } => {
                     self.report_status = None;
                     self.results = results;
@@ -535,14 +583,20 @@ impl App {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(28.0, 4.0), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, pal.accent);
         ui.add_space(48.0);
-        let pages = [(1, Page::GameMode, t.game_mode), (2, Page::Cleanup, t.cleanup), (3, Page::History, t.history), (4, Page::Settings, t.settings)];
+        let pages = [
+            (1, Page::GameMode, t.game_mode),
+            (2, Page::Cleanup, t.cleanup),
+            (3, Page::Debloat, t.debloat),
+            (4, Page::History, t.history),
+            (5, Page::Settings, t.settings),
+        ];
         for (number, page, name) in pages {
             if nav_item(ui, number, name, self.page == page).clicked() {
                 self.page = page;
                 match page {
                     Page::History => self.history = storage::load_history(),
                     Page::Settings => self.refresh_custom_rules(),
-                    Page::GameMode | Page::Cleanup => {}
+                    Page::GameMode | Page::Cleanup | Page::Debloat => {}
                 }
             }
         }
@@ -1010,6 +1064,169 @@ impl App {
         });
     }
 
+    fn analyze_debloat(&mut self, ctx: &egui::Context) {
+        self.debloat_phase = DebloatPhase::Analyzing;
+        let catalog = self.debloat_catalog.clone();
+        self.spawn_task(ctx, move |tx, _| {
+            let _ = tx.send(Message::DebloatAnalyzed(debloat::analyze(&catalog)));
+        });
+    }
+
+    /// Changes the user's own settings and apps in this process, then the rest through one elevated run.
+    fn run_debloat(&mut self, ctx: &egui::Context, ids: Vec<String>, action: debloat::Action) {
+        self.debloat_phase = DebloatPhase::Running;
+        self.debloat_outcomes.clear();
+        self.debloat_warning = None;
+        let t = self.t;
+        let catalog = self.debloat_catalog.clone();
+        let needs_admin = catalog.items.iter().any(|i| ids.contains(&i.id) && i.needs_admin());
+        self.spawn_task(ctx, move |tx, _| {
+            let mut outcomes = debloat::run(&catalog, &ids, action, false);
+            let mut warning = None;
+            if needs_admin {
+                match admin::debloat_system(&ids, action) {
+                    Ok(elevated) => {
+                        for result in elevated {
+                            if let Some(outcome) = outcomes.iter_mut().find(|o| o.id == result.id) {
+                                outcome.failures.extend(result.failures);
+                            }
+                        }
+                    }
+                    Err(error) => warning = Some(t.admin_error(error, t.permission_denied_debloat)),
+                }
+            }
+            let _ = tx.send(Message::DebloatDone { action, ids, outcomes, warning });
+        });
+    }
+
+    /// Records the apps uninstalled here, so the page can offer to reinstall them from the Store.
+    fn remember_removed_apps(&mut self, ids: &[String], outcomes: &[debloat::Outcome]) {
+        let removed: Vec<String> = self
+            .debloat_catalog
+            .items
+            .iter()
+            .filter(|i| i.has_apps() && !i.can_undo() && ids.contains(&i.id))
+            .filter(|i| outcomes.iter().find(|o| o.id == i.id).is_some_and(|o| !o.failures.iter().any(|f| matches!(f, debloat::Failure::App { .. }))))
+            .map(|i| i.id.clone())
+            .collect();
+        for id in removed {
+            if !self.config.removed_apps.contains(&id) {
+                self.config.removed_apps.push(id);
+            }
+        }
+        self.save_config();
+    }
+
+    fn debloat_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        heading(ui, t.debloat, t.debloat_subtitle);
+        let action = match self.debloat_phase {
+            DebloatPhase::Idle => {
+                ui.add(egui::Label::new(text(t.debloat_intro, regular(14.0), pal.text_muted)).wrap());
+                ui.add_space(20.0);
+                primary_button(ui, t.analyze, 200.0, true).clicked().then_some(DebloatAction::Analyze)
+            }
+            DebloatPhase::Analyzing => {
+                loading(ui, t.checking_windows);
+                None
+            }
+            DebloatPhase::Running => {
+                loading(ui, t.applying_changes);
+                None
+            }
+            DebloatPhase::Analyzed => self.debloat_list(ui),
+        };
+        match action {
+            Some(DebloatAction::Analyze) => self.analyze_debloat(ctx),
+            Some(DebloatAction::Apply) => {
+                let ids: Vec<String> = self.debloat_catalog.items.iter().filter(|i| self.debloat_selection.contains(&i.id)).map(|i| i.id.clone()).collect();
+                self.run_debloat(ctx, ids, debloat::Action::Apply);
+            }
+            Some(DebloatAction::Undo(id)) => self.run_debloat(ctx, vec![id], debloat::Action::Undo),
+            Some(DebloatAction::Reinstall(name)) => {
+                system::shell_open(&debloat::store_search_uri(&name));
+            }
+            None => {}
+        }
+    }
+
+    fn debloat_list(&mut self, ui: &mut Ui) -> Option<DebloatAction> {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        let mut action = None;
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                if link(ui, t.analyze_again, pal.text_muted).clicked() {
+                    action = Some(DebloatAction::Analyze);
+                }
+            });
+        });
+        if let Some(warning) = &self.debloat_warning {
+            ui.add(egui::Label::new(text(warning, semibold(13.0), pal.accent_text)).wrap());
+        }
+        let failures: Vec<String> = self
+            .debloat_outcomes
+            .iter()
+            .flat_map(|outcome| {
+                let name = self.debloat_catalog.items.iter().find(|i| i.id == outcome.id).map(|i| i.name.get(t.language).to_string()).unwrap_or_else(|| outcome.id.clone());
+                outcome.failures.iter().map(move |f| format!("{name}: {}", t.debloat_failure(f)))
+            })
+            .collect();
+        for failure in &failures {
+            ui.add(egui::Label::new(text(failure, semibold(13.0), pal.accent_text)).wrap());
+        }
+        if !self.debloat_outcomes.is_empty() && failures.is_empty() && self.debloat_warning.is_none() {
+            ui.add(egui::Label::new(text(t.debloat_done, semibold(13.0), pal.text)).wrap());
+        }
+        ui.add_space(10.0);
+        let height = ui.available_height() - 104.0;
+        let width = ui.available_width();
+        egui::ScrollArea::vertical().id_salt("debloat").max_height(height).show(ui, |ui| {
+            ui.set_width(width);
+            for section in Section::ALL {
+                let items: Vec<(&debloat::Item, ItemState)> = self
+                    .debloat_catalog
+                    .items
+                    .iter()
+                    .filter(|i| i.section == section)
+                    .map(|i| (i, self.debloat_states.get(&i.id).copied().unwrap_or(ItemState::Absent)))
+                    .filter(|(i, state)| *state != ItemState::Absent || self.config.removed_apps.contains(&i.id))
+                    .collect();
+                if items.is_empty() {
+                    continue;
+                }
+                section_label(ui, t.debloat_section(section));
+                rule(ui);
+                for (item, state) in items {
+                    let row = match state {
+                        ItemState::Absent => removed_app_row(ui, t, item),
+                        ItemState::Applied | ItemState::Partial | ItemState::NotApplied => debloat_row(ui, t, item, state, &mut self.debloat_selection),
+                    };
+                    if let Some(a) = row {
+                        action = Some(a);
+                    }
+                }
+                ui.add_space(22.0);
+            }
+        });
+        rule(ui);
+        ui.add_space(14.0);
+        let selected = self.debloat_selection.len();
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                section_label(ui, t.selected);
+                ui.label(text(t.items_count(selected), semibold(24.0), pal.text));
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if primary_button(ui, t.apply_selected, 240.0, selected > 0).clicked() {
+                    action = Some(DebloatAction::Apply);
+                }
+            });
+        });
+        action
+    }
+
     fn history_page(&mut self, ui: &mut Ui) {
         let pal = palette(ui.ctx());
         let t = self.t;
@@ -1193,6 +1410,7 @@ impl eframe::App for App {
             .show(ctx, |ui| match self.page {
                 Page::GameMode => self.game_mode_page(ui, ctx),
                 Page::Cleanup => self.cleanup_page(ui, ctx),
+                Page::Debloat => self.debloat_page(ui, ctx),
                 Page::History => self.history_page(ui),
                 Page::Settings => self.settings_page(ui, ctx),
             });
@@ -1271,6 +1489,78 @@ fn category_row(ui: &mut Ui, t: &Texts, category: &Category, analysis: &Analysis
                 (bytes, false) => (t.size(bytes), pal.text),
             };
             ui.label(text(value, semibold(14.5), color));
+        });
+    });
+    ui.add_space(12.0);
+    rule(ui);
+    action
+}
+
+fn debloat_row(ui: &mut Ui, t: &Texts, item: &debloat::Item, state: ItemState, selection: &mut HashSet<String>) -> Option<DebloatAction> {
+    let pal = palette(ui.ctx());
+    let mut action = None;
+    let done = state == ItemState::Applied;
+    ui.add_space(12.0);
+    ui.horizontal_top(|ui| {
+        let mut checked = selection.contains(&item.id);
+        if bare_checkbox(ui, &mut checked, item.name.get(t.language), !done).changed() {
+            match checked {
+                true => selection.insert(item.id.clone()),
+                false => selection.remove(&item.id),
+            };
+        }
+        ui.add_space(10.0);
+        let text_width = ui.available_width() - 120.0;
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
+            ui.horizontal(|ui| {
+                ui.label(text(item.name.get(t.language), semibold(14.5), if done { pal.text_faint } else { pal.text }));
+                if item.needs_admin() {
+                    tag(ui, t.tag_admin, pal.text_muted);
+                }
+                if item.caution {
+                    tag(ui, t.tag_caution, pal.accent_text);
+                }
+                match state {
+                    ItemState::Applied => tag(ui, t.tag_done, pal.text_muted),
+                    ItemState::Partial => tag(ui, t.tag_partly, pal.text_muted),
+                    ItemState::NotApplied | ItemState::Absent => {}
+                }
+            });
+            ui.add(egui::Label::new(text(item.description.get(t.language), regular(12.5), pal.text_muted)).wrap());
+        });
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            let undoable = matches!(state, ItemState::Applied | ItemState::Partial) && item.can_undo();
+            if undoable && link(ui, t.undo, pal.text_muted).clicked() {
+                action = Some(DebloatAction::Undo(item.id.clone()));
+            }
+        });
+    });
+    ui.add_space(12.0);
+    rule(ui);
+    action
+}
+
+/// An app uninstalled from this page, with a way back through the Microsoft Store.
+fn removed_app_row(ui: &mut Ui, t: &Texts, item: &debloat::Item) -> Option<DebloatAction> {
+    let pal = palette(ui.ctx());
+    let mut action = None;
+    ui.add_space(12.0);
+    ui.horizontal_top(|ui| {
+        ui.add_space(28.0);
+        let text_width = ui.available_width() - 200.0;
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
+            ui.horizontal(|ui| {
+                ui.label(text(item.name.get(t.language), semibold(14.5), pal.text_faint));
+                tag(ui, t.tag_uninstalled, pal.text_muted);
+            });
+            ui.add(egui::Label::new(text(item.description.get(t.language), regular(12.5), pal.text_muted)).wrap());
+        });
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            if link(ui, t.reinstall_from_store, pal.accent_text).clicked() {
+                action = Some(DebloatAction::Reinstall(item.name.get(t.language).to_string()));
+            }
         });
     });
     ui.add_space(12.0);

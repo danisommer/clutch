@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::{self, Language};
-use crate::{cleanup, storage, system};
+use crate::{cleanup, debloat, storage, system};
 
 pub const ARG: &str = "--admin";
 
@@ -21,6 +21,13 @@ struct CleanRequest {
     ids: Vec<String>,
     recycle_folders: bool,
     language: Language,
+}
+
+/// Decrapify items to apply or undo in the elevated process.
+#[derive(Serialize, Deserialize)]
+struct DebloatRequest {
+    ids: Vec<String>,
+    action: debloat::Action,
 }
 
 /// Folder used to pass requests and results between the window and the elevated process.
@@ -42,11 +49,12 @@ fn write_result<T: serde::Serialize>(path: &Path, value: &T) -> i32 {
     }
 }
 
-fn read_request(path: &Path) -> Option<CleanRequest> {
+fn read_request<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
     fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok())
 }
 
-/// Handles `--admin analyze <out>` and `--admin clean <in> <out>`. Exit codes: 0 ok, 2 bad arguments, 3 write failure.
+/// Handles `--admin analyze <out>`, `--admin clean <in> <out>` and `--admin debloat <in> <out>`.
+/// Exit codes: 0 ok, 2 bad arguments, 3 write failure.
 pub fn run(args: &[String]) -> i32 {
     let parts: Vec<&str> = args.iter().map(String::as_str).collect();
     match parts.as_slice() {
@@ -56,10 +64,17 @@ pub fn run(args: &[String]) -> i32 {
         },
         [_, ARG, "clean", input, output] => {
             let (Some(input), Some(output)) = (inside_exchange_dir(input), inside_exchange_dir(output)) else { return EXIT_BAD_ARGS };
-            let Some(request) = read_request(&input) else { return EXIT_BAD_ARGS };
+            let Some(request) = read_request::<CleanRequest>(&input) else { return EXIT_BAD_ARGS };
             let catalog = cleanup::builtin_catalog();
             let known: Vec<String> = request.ids.into_iter().filter(|id| catalog.categories.iter().any(|c| &c.id == id)).collect();
             write_result(&output, &cleanup::clean(&known, true, request.recycle_folders, i18n::texts(request.language), &|_| {}))
+        }
+        [_, ARG, "debloat", input, output] => {
+            let (Some(input), Some(output)) = (inside_exchange_dir(input), inside_exchange_dir(output)) else { return EXIT_BAD_ARGS };
+            let Some(request) = read_request::<DebloatRequest>(&input) else { return EXIT_BAD_ARGS };
+            let catalog = debloat::catalog();
+            let known: Vec<String> = request.ids.into_iter().filter(|id| catalog.items.iter().any(|i| &i.id == id)).collect();
+            write_result(&output, &debloat::run(&catalog, &known, request.action, true))
         }
         _ => EXIT_BAD_ARGS,
     }
@@ -98,4 +113,14 @@ pub fn clean_system(ids: &[String], recycle_folders: bool, language: Language) -
     let bytes = serde_json::to_vec(&request).map_err(|e| AdminError::Io(e.to_string()))?;
     fs::write(&input, bytes).map_err(|e| AdminError::Io(e.to_string()))?;
     invoke(format!("{ARG} clean \"{}\" \"{}\"", input.display(), output.display()), &output)
+}
+
+/// Asks for elevation and applies or undoes the parts of the chosen decrapify items that need administrator rights.
+pub fn debloat_system(ids: &[String], action: debloat::Action) -> Result<Vec<debloat::Outcome>, AdminError> {
+    let input = exchange_dir().join("debloat-request.json");
+    let output = exchange_dir().join("debloat-result.json");
+    let request = DebloatRequest { ids: ids.to_vec(), action };
+    let bytes = serde_json::to_vec(&request).map_err(|e| AdminError::Io(e.to_string()))?;
+    fs::write(&input, bytes).map_err(|e| AdminError::Io(e.to_string()))?;
+    invoke(format!("{ARG} debloat \"{}\" \"{}\"", input.display(), output.display()), &output)
 }

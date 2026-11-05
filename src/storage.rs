@@ -95,6 +95,7 @@ pub struct Config {
     pub recycle_folders: bool,
     pub custom_games: Vec<CustomGame>,
     pub profiles: Vec<GameProfile>,
+    pub removed_apps: Vec<String>,
 }
 
 impl Default for Config {
@@ -122,6 +123,7 @@ impl Default for Config {
             recycle_folders: false,
             custom_games: Vec::new(),
             profiles: Vec::new(),
+            removed_apps: Vec::new(),
         }
     }
 }

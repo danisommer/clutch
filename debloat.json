@@ -1,0 +1,429 @@
+{
+  "items": [
+    {
+      "id": "telemetry-services",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Serviços de telemetria", "en": "Telemetry services" },
+      "description": { "pt-BR": "Desativa \"Experiências do Usuário Conectado e Telemetria\" e o roteamento de mensagens que ele usa. São os serviços que enviam dados de uso à Microsoft.", "en": "Turns off \"Connected User Experiences and Telemetry\" and the message routing it uses. They are the services that send usage data to Microsoft." },
+      "targets": [
+        { "kind": "service", "name": "DiagTrack", "restore": "automatic" },
+        { "kind": "service", "name": "dmwappushservice", "restore": "manual" }
+      ]
+    },
+    {
+      "id": "telemetry-tasks",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Tarefas de coleta de dados", "en": "Data collection tasks" },
+      "description": { "pt-BR": "Tarefas agendadas do Programa de Aperfeiçoamento da Experiência do Usuário, de feedback e de diagnóstico, que juntam e enviam dados de uso.", "en": "Scheduled tasks of the Customer Experience Improvement Program, feedback and diagnostics, which gather and send usage data." },
+      "targets": [
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Customer Experience Improvement Program\\Consolidator" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Customer Experience Improvement Program\\UsbCeip" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Autochk\\Proxy" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Feedback\\Siuf\\DmClient" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Feedback\\Siuf\\DmClientOnScenarioDownload" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Application Experience\\MareBackup" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\DiskDiagnostic\\Microsoft-Windows-DiskDiagnosticDataCollector" }
+      ]
+    },
+    {
+      "id": "compatibility-appraiser",
+      "section": "dataCollection",
+      "caution": true,
+      "name": { "pt-BR": "Avaliador de compatibilidade", "en": "Compatibility Appraiser" },
+      "description": { "pt-BR": "Tarefa que roda o CompatTelRunner.exe, conhecido por picos de CPU e disco. Os dados dela ajudam o Windows a decidir se o computador está pronto para uma nova versão.", "en": "Task that runs CompatTelRunner.exe, known for CPU and disk spikes. Its data helps Windows decide whether the computer is ready for a new version." },
+      "targets": [
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Application Experience\\Microsoft Compatibility Appraiser" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Application Experience\\Microsoft Compatibility Appraiser Exp" },
+        { "kind": "task", "path": "\\Microsoft\\Windows\\Application Experience\\ProgramDataUpdater" }
+      ]
+    },
+    {
+      "id": "diagnostic-data",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Só dados de diagnóstico obrigatórios", "en": "Required diagnostic data only" },
+      "description": { "pt-BR": "Deixa no mínimo que esta edição do Windows permite o que é enviado à Microsoft, como em Configurações > Privacidade > Diagnóstico e comentários. Desfazer volta a enviar os dados opcionais.", "en": "Keeps what is sent to Microsoft at the minimum this Windows edition allows, as in Settings > Privacy > Diagnostics & feedback. Undo sends the optional data again." },
+      "targets": [
+        { "kind": "registry", "hive": "HKLM", "key": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", "value": "AllowTelemetry", "apply": 1, "restore": 3 }
+      ]
+    },
+    {
+      "id": "tailored-experiences",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Experiências personalizadas", "en": "Tailored experiences" },
+      "description": { "pt-BR": "A Microsoft deixa de usar seus dados de diagnóstico para mostrar dicas, anúncios e recomendações.", "en": "Microsoft stops using your diagnostic data to show tips, ads and recommendations." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Privacy", "value": "TailoredExperiencesWithDiagnosticDataEnabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "feedback-requests",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Pedidos de feedback", "en": "Feedback requests" },
+      "description": { "pt-BR": "O Windows para de perguntar o que você acha dele.", "en": "Windows stops asking what you think about it." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Siuf\\Rules", "value": "NumberOfSIUFInPeriod", "apply": 0, "restore": null }
+      ]
+    },
+    {
+      "id": "inking-typing",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Personalização de escrita e digitação", "en": "Inking and typing personalization" },
+      "description": { "pt-BR": "Para de coletar o que você digita e escreve à mão para montar um dicionário pessoal.", "en": "Stops collecting what you type and handwrite to build a personal dictionary." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\InputPersonalization", "value": "RestrictImplicitInkCollection", "apply": 1, "restore": 0 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\InputPersonalization", "value": "RestrictImplicitTextCollection", "apply": 1, "restore": 0 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\InputPersonalization\\TrainedDataStore", "value": "HarvestContacts", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Personalization\\Settings", "value": "AcceptedPrivacyPolicy", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "language-list",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Lista de idiomas para sites", "en": "Language list for websites" },
+      "description": { "pt-BR": "Sites deixam de ler a lista de idiomas do Windows para mostrar conteúdo local.", "en": "Websites no longer read the Windows language list to show local content." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Control Panel\\International\\User Profile", "value": "HttpAcceptLanguageOptOut", "apply": 1, "restore": null }
+      ]
+    },
+    {
+      "id": "activity-history",
+      "section": "dataCollection",
+      "name": { "pt-BR": "Histórico de atividades", "en": "Activity history" },
+      "description": { "pt-BR": "O Windows para de registrar e enviar quais apps, arquivos e sites você usa.", "en": "Windows stops recording and sending which apps, files and sites you use." },
+      "targets": [
+        { "kind": "registry", "hive": "HKLM", "key": "SOFTWARE\\Policies\\Microsoft\\Windows\\System", "value": "PublishUserActivities", "apply": 0, "restore": null },
+        { "kind": "registry", "hive": "HKLM", "key": "SOFTWARE\\Policies\\Microsoft\\Windows\\System", "value": "UploadUserActivities", "apply": 0, "restore": null }
+      ]
+    },
+    {
+      "id": "app-launch-tracking",
+      "section": "dataCollection",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Registro de apps abertos", "en": "App launch tracking" },
+      "description": { "pt-BR": "O Windows para de anotar quais apps você abre. A lista \"Mais usados\" do Iniciar deixa de funcionar.", "en": "Windows stops noting which apps you open. The \"Most used\" list in Start stops working." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "value": "Start_TrackProgs", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "error-reporting",
+      "section": "dataCollection",
+      "caution": true,
+      "name": { "pt-BR": "Relatório de erros do Windows", "en": "Windows Error Reporting" },
+      "description": { "pt-BR": "Para de enviar relatórios de travamento à Microsoft. Eles ajudam a corrigir drivers e programas que travam.", "en": "Stops sending crash reports to Microsoft. They help fix drivers and programs that crash." },
+      "targets": [
+        { "kind": "registry", "hive": "HKLM", "key": "SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting", "value": "Disabled", "apply": 1, "restore": null }
+      ]
+    },
+    {
+      "id": "advertising-id",
+      "section": "ads",
+      "name": { "pt-BR": "ID de anúncio", "en": "Advertising ID" },
+      "description": { "pt-BR": "Apps deixam de usar um identificador seu para mostrar anúncios direcionados.", "en": "Apps stop using an identifier of yours to show targeted ads." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", "value": "Enabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "silent-app-installs",
+      "section": "ads",
+      "name": { "pt-BR": "Apps instalados sem pedir", "en": "Apps installed without asking" },
+      "description": { "pt-BR": "Impede o Windows de instalar sozinho apps e jogos \"sugeridos\".", "en": "Stops Windows from installing \"suggested\" apps and games by itself." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SilentInstalledAppsEnabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "PreInstalledAppsEnabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "OemPreInstalledAppsEnabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "tips-notifications",
+      "section": "ads",
+      "name": { "pt-BR": "Dicas e \"vamos concluir a configuração\"", "en": "Tips and \"let's finish setting up\"" },
+      "description": { "pt-BR": "Notificações de dicas, a tela de boas-vindas depois de atualizações e os convites para terminar de configurar o Windows.", "en": "Tip notifications, the welcome screen after updates and the invitations to finish setting up Windows." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-338389Enabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SoftLandingEnabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-310093Enabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\UserProfileEngagement", "value": "ScoobeSystemSettingEnabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "settings-suggestions",
+      "section": "ads",
+      "name": { "pt-BR": "Sugestões no app Configurações", "en": "Suggestions in the Settings app" },
+      "description": { "pt-BR": "Tira o conteúdo sugerido que aparece nas páginas de Configurações.", "en": "Removes the suggested content shown on Settings pages." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-338393Enabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-353694Enabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-353696Enabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "start-recommendations",
+      "section": "ads",
+      "name": { "pt-BR": "Recomendações no Iniciar", "en": "Start menu recommendations" },
+      "description": { "pt-BR": "Tira do Iniciar as sugestões de apps da Store, dicas e avisos da conta Microsoft. Arquivos recentes continuam.", "en": "Removes Store app suggestions, tips and Microsoft account notices from Start. Recent files stay." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "value": "Start_IrisRecommendations", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "value": "Start_AccountNotifications", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SystemPaneSuggestionsEnabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-338388Enabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "lock-screen-tips",
+      "section": "ads",
+      "name": { "pt-BR": "Dicas na tela de bloqueio", "en": "Lock screen tips" },
+      "description": { "pt-BR": "Tira curiosidades, dicas e anúncios da tela de bloqueio. As imagens continuam.", "en": "Removes fun facts, tips and ads from the lock screen. The pictures stay." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "RotatingLockScreenOverlayEnabled", "apply": 0, "restore": 1 },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-338387Enabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "explorer-notices",
+      "section": "ads",
+      "name": { "pt-BR": "Avisos no Explorador de Arquivos", "en": "Notices in File Explorer" },
+      "description": { "pt-BR": "Tira as propagandas do OneDrive e do Microsoft 365 que aparecem no Explorador.", "en": "Removes the OneDrive and Microsoft 365 promotions shown in File Explorer." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "value": "ShowSyncProviderNotifications", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "search-highlights",
+      "section": "ads",
+      "name": { "pt-BR": "Destaques da pesquisa", "en": "Search highlights" },
+      "description": { "pt-BR": "Tira as datas comemorativas e notícias que aparecem na caixa de pesquisa.", "en": "Removes the special days and news shown in the search box." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\SearchSettings", "value": "IsDynamicSearchBoxEnabled", "apply": 0, "restore": 1 }
+      ]
+    },
+    {
+      "id": "web-search",
+      "section": "ads",
+      "name": { "pt-BR": "Bing na pesquisa do Iniciar", "en": "Bing in Start search" },
+      "description": { "pt-BR": "A pesquisa do Iniciar mostra só o que está no computador, sem resultados da web nem do Bing.", "en": "Start search shows only what is on the computer, without web or Bing results." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Policies\\Microsoft\\Windows\\Explorer", "value": "DisableSearchBoxSuggestions", "apply": 1, "restore": null }
+      ]
+    },
+    {
+      "id": "recall",
+      "section": "ai",
+      "name": { "pt-BR": "Recall", "en": "Recall" },
+      "description": { "pt-BR": "Impede o Windows de tirar fotos da tela e analisar o que você faz. Só existe em computadores Copilot+.", "en": "Stops Windows from taking screen snapshots and analyzing what you do. Only exists on Copilot+ PCs." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Policies\\Microsoft\\Windows\\WindowsAI", "value": "DisableAIDataAnalysis", "apply": 1, "restore": null }
+      ]
+    },
+    {
+      "id": "copilot",
+      "section": "ai",
+      "name": { "pt-BR": "Copilot", "en": "Copilot" },
+      "description": { "pt-BR": "Desinstala o app do Copilot e desliga o painel lateral das versões anteriores do Windows.", "en": "Uninstalls the Copilot app and turns off the side pane of earlier Windows versions." },
+      "targets": [
+        { "kind": "app", "package": "Microsoft.Copilot" },
+        { "kind": "app", "package": "Microsoft.Windows.Ai.Copilot.Provider" },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Policies\\Microsoft\\Windows\\WindowsCopilot", "value": "TurnOffWindowsCopilot", "apply": 1, "restore": null }
+      ]
+    },
+    {
+      "id": "delivery-optimization-peers",
+      "section": "background",
+      "name": { "pt-BR": "Upload de atualizações para outros PCs", "en": "Uploading updates to other PCs" },
+      "description": { "pt-BR": "O Windows para de usar sua internet para enviar partes de atualizações a outros computadores. As atualizações continuam chegando.", "en": "Windows stops using your internet to send pieces of updates to other computers. Updates keep coming." },
+      "targets": [
+        { "kind": "registry", "hive": "HKLM", "key": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization", "value": "DODownloadMode", "apply": 0, "restore": null }
+      ]
+    },
+    {
+      "id": "edge-background",
+      "section": "background",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Edge rodando escondido", "en": "Edge running in the background" },
+      "description": { "pt-BR": "O Edge para de abrir escondido junto com o Windows e de continuar rodando depois de fechado. Ele passa a dizer que é \"gerenciado pela organização\".", "en": "Edge stops opening hidden with Windows and running after it is closed. It then says it is \"managed by your organization\"." },
+      "targets": [
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Policies\\Microsoft\\Edge", "value": "StartupBoostEnabled", "apply": 0, "restore": null },
+        { "kind": "registry", "hive": "HKCU", "key": "Software\\Policies\\Microsoft\\Edge", "value": "BackgroundModeEnabled", "apply": 0, "restore": null }
+      ]
+    },
+    {
+      "id": "app-feedback-hub",
+      "section": "apps",
+      "name": { "pt-BR": "Hub de Comentários", "en": "Feedback Hub" },
+      "description": { "pt-BR": "App para mandar sugestões e erros à Microsoft.", "en": "App to send suggestions and bugs to Microsoft." },
+      "targets": [{ "kind": "app", "package": "Microsoft.WindowsFeedbackHub" }]
+    },
+    {
+      "id": "app-widgets",
+      "section": "apps",
+      "name": { "pt-BR": "Widgets", "en": "Widgets" },
+      "description": { "pt-BR": "Painel de notícias e clima da barra de tarefas, que fica rodando em segundo plano.", "en": "News and weather panel on the taskbar, which keeps running in the background." },
+      "targets": [{ "kind": "app", "package": "MicrosoftWindows.Client.WebExperience" }]
+    },
+    {
+      "id": "app-bing",
+      "section": "apps",
+      "name": { "pt-BR": "Apps do Bing", "en": "Bing apps" },
+      "description": { "pt-BR": "Bing Notícias, Bing Clima e Bing Pesquisa.", "en": "Bing News, Bing Weather and Bing Search." },
+      "targets": [
+        { "kind": "app", "package": "Microsoft.BingNews" },
+        { "kind": "app", "package": "Microsoft.BingWeather" },
+        { "kind": "app", "package": "Microsoft.BingSearch" }
+      ]
+    },
+    {
+      "id": "app-office-hub",
+      "section": "apps",
+      "name": { "pt-BR": "Microsoft 365 (Office)", "en": "Microsoft 365 (Office)" },
+      "description": { "pt-BR": "Atalho que divulga a assinatura do Microsoft 365. Não remove o Office instalado.", "en": "Shortcut that advertises the Microsoft 365 subscription. It does not remove an installed Office." },
+      "targets": [{ "kind": "app", "package": "Microsoft.MicrosoftOfficeHub" }]
+    },
+    {
+      "id": "app-get-started",
+      "section": "apps",
+      "name": { "pt-BR": "Dicas", "en": "Tips" },
+      "description": { "pt-BR": "App de dicas de uso do Windows.", "en": "App with Windows usage tips." },
+      "targets": [{ "kind": "app", "package": "Microsoft.Getstarted" }]
+    },
+    {
+      "id": "app-cortana",
+      "section": "apps",
+      "name": { "pt-BR": "Cortana", "en": "Cortana" },
+      "description": { "pt-BR": "Assistente que a Microsoft já descontinuou.", "en": "Assistant that Microsoft has discontinued." },
+      "targets": [{ "kind": "app", "package": "Microsoft.549981C3F5F10" }]
+    },
+    {
+      "id": "app-mixed-reality",
+      "section": "apps",
+      "name": { "pt-BR": "Portal de Realidade Misturada", "en": "Mixed Reality Portal" },
+      "description": { "pt-BR": "Só serve para óculos de realidade mista do Windows, que a Microsoft descontinuou.", "en": "Only used by Windows mixed reality headsets, which Microsoft discontinued." },
+      "targets": [{ "kind": "app", "package": "Microsoft.MixedReality.Portal" }]
+    },
+    {
+      "id": "app-3d",
+      "section": "apps",
+      "name": { "pt-BR": "Visualizador 3D e Paint 3D", "en": "3D Viewer and Paint 3D" },
+      "description": { "pt-BR": "Apps antigos de 3D. O Paint comum não é afetado.", "en": "Old 3D apps. The regular Paint is not affected." },
+      "targets": [
+        { "kind": "app", "package": "Microsoft.Microsoft3DViewer" },
+        { "kind": "app", "package": "Microsoft.MSPaint" }
+      ]
+    },
+    {
+      "id": "app-clipchamp",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Clipchamp", "en": "Clipchamp" },
+      "description": { "pt-BR": "Editor de vídeo online da Microsoft.", "en": "Microsoft's online video editor." },
+      "targets": [{ "kind": "app", "package": "Clipchamp.Clipchamp" }]
+    },
+    {
+      "id": "app-solitaire",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Coleção de Paciência", "en": "Solitaire Collection" },
+      "description": { "pt-BR": "Jogos de cartas com propaganda.", "en": "Card games with ads." },
+      "targets": [{ "kind": "app", "package": "Microsoft.MicrosoftSolitaireCollection" }]
+    },
+    {
+      "id": "app-dev-home",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Dev Home", "en": "Dev Home" },
+      "description": { "pt-BR": "Painel para desenvolvedores que a Microsoft está descontinuando.", "en": "Developer dashboard that Microsoft is retiring." },
+      "targets": [{ "kind": "app", "package": "Microsoft.Windows.DevHome" }]
+    },
+    {
+      "id": "app-maps",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Mapas", "en": "Maps" },
+      "description": { "pt-BR": "App de mapas do Windows.", "en": "Windows maps app." },
+      "targets": [{ "kind": "app", "package": "Microsoft.WindowsMaps" }]
+    },
+    {
+      "id": "app-people",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Pessoas", "en": "People" },
+      "description": { "pt-BR": "App antigo de contatos.", "en": "Old contacts app." },
+      "targets": [{ "kind": "app", "package": "Microsoft.People" }]
+    },
+    {
+      "id": "app-todo",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Microsoft To Do", "en": "Microsoft To Do" },
+      "description": { "pt-BR": "App de listas de tarefas.", "en": "To-do list app." },
+      "targets": [{ "kind": "app", "package": "Microsoft.Todos" }]
+    },
+    {
+      "id": "app-power-automate",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Power Automate", "en": "Power Automate" },
+      "description": { "pt-BR": "Ferramenta de automação de tarefas.", "en": "Task automation tool." },
+      "targets": [{ "kind": "app", "package": "Microsoft.PowerAutomateDesktop" }]
+    },
+    {
+      "id": "app-movies-tv",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Filmes e TV", "en": "Movies & TV" },
+      "description": { "pt-BR": "Loja e player de vídeos da Microsoft. O Media Player não é afetado.", "en": "Microsoft's video store and player. Media Player is not affected." },
+      "targets": [{ "kind": "app", "package": "Microsoft.ZuneVideo" }]
+    },
+    {
+      "id": "app-family",
+      "section": "apps",
+      "selectedByDefault": false,
+      "name": { "pt-BR": "Microsoft Family", "en": "Microsoft Family" },
+      "description": { "pt-BR": "Controle parental da conta Microsoft.", "en": "Microsoft account parental controls." },
+      "targets": [{ "kind": "app", "package": "MicrosoftCorporationII.MicrosoftFamily" }]
+    },
+    {
+      "id": "app-get-help",
+      "section": "apps",
+      "caution": true,
+      "name": { "pt-BR": "Obter Ajuda", "en": "Get Help" },
+      "description": { "pt-BR": "Os solucionadores de problemas do Windows abrem por este app.", "en": "Windows troubleshooters open through this app." },
+      "targets": [{ "kind": "app", "package": "Microsoft.GetHelp" }]
+    },
+    {
+      "id": "app-phone-link",
+      "section": "apps",
+      "caution": true,
+      "name": { "pt-BR": "Vincular ao Celular", "en": "Phone Link" },
+      "description": { "pt-BR": "Mostra mensagens, chamadas e fotos do celular no computador.", "en": "Shows your phone's messages, calls and photos on the computer." },
+      "targets": [{ "kind": "app", "package": "Microsoft.YourPhone" }]
+    },
+    {
+      "id": "app-outlook",
+      "section": "apps",
+      "caution": true,
+      "name": { "pt-BR": "Outlook (novo)", "en": "Outlook (new)" },
+      "description": { "pt-BR": "App de e-mail e calendário que substituiu o Email e Calendário.", "en": "Mail and calendar app that replaced Mail and Calendar." },
+      "targets": [{ "kind": "app", "package": "Microsoft.OutlookForWindows" }]
+    },
+    {
+      "id": "app-teams",
+      "section": "apps",
+      "caution": true,
+      "name": { "pt-BR": "Microsoft Teams", "en": "Microsoft Teams" },
+      "description": { "pt-BR": "O mesmo app serve para o Teams pessoal e o do trabalho.", "en": "The same app is used for personal and work Teams." },
+      "targets": [
+        { "kind": "app", "package": "MSTeams" },
+        { "kind": "app", "package": "MicrosoftTeams" }
+      ]
+    },
+    {
+      "id": "app-quick-assist",
+      "section": "apps",
+      "caution": true,
+      "name": { "pt-BR": "Assistência Rápida", "en": "Quick Assist" },
+      "description": { "pt-BR": "Permite que alguém acesse o computador para ajudar. Também é usado em golpes de \"suporte técnico\".", "en": "Lets someone access the computer to help. It is also used in \"tech support\" scams." },
+      "targets": [{ "kind": "app", "package": "MicrosoftCorporationII.QuickAssist" }]
+    }
+  ]
+}

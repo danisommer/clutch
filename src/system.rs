@@ -35,9 +35,10 @@ use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Services::{
-    CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW, QueryServiceStatus,
-    SC_MANAGER_CONNECT, SERVICE_CONTROL_STOP, SERVICE_QUERY_STATUS, SERVICE_RUNNING,
-    SERVICE_START, SERVICE_STATUS, SERVICE_STOP, SERVICE_STOPPED, StartServiceW,
+    ChangeServiceConfigW, CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW,
+    QueryServiceConfigW, QueryServiceStatus, SC_MANAGER_CONNECT, SERVICE_CHANGE_CONFIG, SERVICE_CONTROL_STOP,
+    SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_START, SERVICE_STATUS,
+    SERVICE_STOP, SERVICE_STOPPED, StartServiceW,
 };
 use windows_sys::Win32::System::SystemInformation::{
     GetLocalTime, GlobalMemoryStatusEx, MEMORYSTATUSEX,
@@ -64,7 +65,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::core::GUID;
 use winreg::RegKey;
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
+use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const NO_SYSTEM_BATTERY: u8 = 128;
@@ -469,6 +470,25 @@ pub fn registry_key_exists(local_machine: bool, path: &str) -> bool {
     registry_root(local_machine).open_subkey_with_flags(path, KEY_READ).is_ok()
 }
 
+/// Writes a DWORD, creating the key when needed.
+pub fn set_registry_u32(local_machine: bool, path: &str, value: &str, data: u32) -> std::io::Result<()> {
+    let (key, _) = registry_root(local_machine).create_subkey(path)?;
+    key.set_value(value, &data)
+}
+
+/// Deletes a value; a value or key that does not exist counts as deleted.
+pub fn delete_registry_value(local_machine: bool, path: &str, value: &str) -> std::io::Result<()> {
+    let not_found = |e: &std::io::Error| e.kind() == std::io::ErrorKind::NotFound;
+    match registry_root(local_machine).open_subkey_with_flags(path, KEY_SET_VALUE) {
+        Ok(key) => match key.delete_value(value) {
+            Err(e) if not_found(&e) => Ok(()),
+            other => other,
+        },
+        Err(e) if not_found(&e) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 /// String values of every subkey of a HKLM key, in the 32-bit view, as (subkey name, lowercase value name → data).
 pub fn registry_subkeys_32(path: &str) -> Vec<(String, HashMap<String, String>)> {
     let flags = KEY_READ | KEY_WOW64_32KEY;
@@ -728,6 +748,103 @@ fn wait_for_state(service: *mut c_void, wanted: u32, timeout: Duration) -> bool 
 pub enum ServiceError {
     NoManager(u32),
     Unavailable(u32),
+    NotChanged(u32),
+}
+
+/// How a service starts (`SERVICE_AUTO_START`, `SERVICE_DEMAND_START`, `SERVICE_DISABLED`…); `None` when it does not exist.
+pub fn service_start_type(name: &str) -> Option<u32> {
+    unsafe {
+        let manager = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
+        if manager.is_null() {
+            return None;
+        }
+        let service = OpenServiceW(manager, wide(name).as_ptr(), SERVICE_QUERY_CONFIG);
+        let start = match service.is_null() {
+            true => None,
+            false => {
+                let mut needed = 0u32;
+                QueryServiceConfigW(service, std::ptr::null_mut(), 0, &mut needed);
+                let mut buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+                let config = buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW;
+                let ok = QueryServiceConfigW(service, config, (buffer.len() * 8) as u32, &mut needed) != 0;
+                CloseServiceHandle(service);
+                match ok {
+                    true => Some((*config).dwStartType),
+                    false => None,
+                }
+            }
+        };
+        CloseServiceHandle(manager);
+        start
+    }
+}
+
+/// Changes how a service starts, leaving the rest of its configuration as it is. Needs administrator rights.
+pub fn set_service_start_type(name: &str, start: u32) -> Result<(), ServiceError> {
+    unsafe {
+        let manager = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
+        if manager.is_null() {
+            return Err(ServiceError::NoManager(GetLastError()));
+        }
+        let service = OpenServiceW(manager, wide(name).as_ptr(), SERVICE_CHANGE_CONFIG);
+        if service.is_null() {
+            let error = GetLastError();
+            CloseServiceHandle(manager);
+            return Err(ServiceError::Unavailable(error));
+        }
+        let changed = ChangeServiceConfigW(
+            service,
+            SERVICE_NO_CHANGE,
+            start,
+            SERVICE_NO_CHANGE,
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+        ) != 0;
+        let error = GetLastError();
+        CloseServiceHandle(service);
+        CloseServiceHandle(manager);
+        match changed {
+            true => Ok(()),
+            false => Err(ServiceError::NotChanged(error)),
+        }
+    }
+}
+
+/// Whether a scheduled task is enabled, read from its XML so the answer does not depend on the Windows language;
+/// `None` when the task does not exist.
+pub fn task_enabled(path: &str) -> Option<bool> {
+    let output = run_hidden("schtasks.exe", &["/Query", "/TN", path, "/XML"]).ok().filter(|o| o.status.success())?;
+    let xml = String::from_utf8_lossy(&output.stdout);
+    let settings = xml.split("<Settings>").nth(1)?.split("</Settings>").next()?;
+    Some(!settings.contains("<Enabled>false</Enabled>"))
+}
+
+/// Enables or disables a scheduled task. Needs administrator rights for the Windows tasks.
+pub fn set_task_enabled(path: &str, enabled: bool) -> bool {
+    let switch = match enabled {
+        true => "/ENABLE",
+        false => "/DISABLE",
+    };
+    run_hidden("schtasks.exe", &["/Change", "/TN", path, switch]).is_ok_and(|o| o.status.success())
+}
+
+/// Names of the Microsoft Store packages installed for the current user, in lowercase.
+pub fn installed_packages() -> HashSet<String> {
+    run_hidden("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", "Get-AppxPackage | Select-Object -ExpandProperty Name"])
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_lowercase()).filter(|l| !l.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+/// Uninstalls Microsoft Store packages for the current user only. The names must be plain package names.
+pub fn remove_packages(names: &[&str]) -> std::io::Result<()> {
+    let list = names.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(",");
+    let command = format!("{list} | ForEach-Object {{ Get-AppxPackage -Name $_ | Remove-AppxPackage }}");
+    run_hidden("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", &command]).map(|_| ())
 }
 
 /// Stops a Windows service; returns whether it was running before.

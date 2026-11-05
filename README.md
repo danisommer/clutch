@@ -48,6 +48,21 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
 - **Running programs block their category**: if Chrome is open, its cache is skipped and you can close it from the app.
 - **Report**: the results of a cleanup can be exported to a text file.
 
+### Decrapify
+
+A page for what Windows does for Microsoft rather than for you. It analyzes first and shows the state of each item on this computer; nothing changes until you check items and apply them.
+
+- **Data collection**:
+  - the telemetry services (`DiagTrack`) and the data collection scheduled tasks;
+  - diagnostic data at the minimum the edition allows, tailored experiences, feedback requests, inking and typing personalization, activity history and the language list for websites;
+  - optionally, app launch tracking, Windows Error Reporting and the Compatibility Appraiser, which runs `CompatTelRunner.exe`.
+- **Ads and suggestions**: advertising ID, apps installed without asking, tips, suggestions in Settings and in Start, lock screen tips, File Explorer promotions, search highlights and Bing results in Start search.
+- **AI**: Recall and Copilot.
+- **Background**: uploading updates to other PCs (Delivery Optimization) and, optionally, Edge running hidden.
+- **Bundled apps**: uninstalled for the current user only, such as Feedback Hub, Widgets, the Bing apps, Microsoft 365 (Office) and Tips. Apps people may rely on (Phone Link, Outlook, Teams, Quick Assist, Get Help) are tagged as caution and never preselected.
+
+Every change can be undone back to the Windows default, except app removals; for those, the page links to the app in the Microsoft Store. Xbox, Game Bar, Windows Search, Windows Update, Defender and OneDrive are left alone. The items are in [`debloat.json`](debloat.json). Services, tasks, machine settings and policies go through the elevated helper, which only accepts ids from that file.
+
 ### History
 
 A list of the cleanups done, with space freed, and of past Game Mode sessions.
@@ -191,12 +206,14 @@ src/
   game_mode.rs   status checks, closing programs, activation and restore
   watcher.rs     background process that ends the session when the game exits
   cleanup.rs     catalog, safety rules, analysis and removal
+  debloat.rs     Decrapify: catalog, state of each item, apply and undo
   admin.rs       elevated helper
   storage.rs     settings, history and session files
   steam.rs       Steam libraries and installed games
   games.rs       games from Steam, Epic Games, GOG and executables added by hand
   system.rs      Win32 wrappers (processes, windows, power, displays, registry, services)
 categories.json  cleanup catalog
+debloat.json     Decrapify catalog
 build.ps1        build and install script
 build.rs         embeds the icon and version info in the executable
 assets/icon.ico  executable and shortcut icon
@@ -217,6 +234,7 @@ Planned:
 - [ ] Support for more CPU and GPU vendors (NVIDIA and Intel shader caches, vendor tools)
 - [ ] Support for more laptop vendors' performance modes (ASUS, MSI, Dell, HP, Acer…)
 - [x] Deeper cleanup and optimization that stays safe and customizable
+- [x] Turn off Windows data collection, ads and bundled apps (Decrapify)
 - [ ] More features in general
 
 Ideas:

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::admin::AdminError;
 use crate::cleanup::{CustomProblem, Group};
+use crate::debloat::{Failure, Section};
 use crate::storage::{HistoryDate, HistoryKind, LanguageChoice, Launcher, Stamp, Summary, format_duration};
 use crate::system::{self, PowerMode, RecycleError, ServiceError};
 
@@ -201,6 +202,19 @@ pub struct Texts {
     pub add_game_exe: &'static str,
     pub pick_game_title: &'static str,
     pub programs_filter: &'static str,
+    pub debloat: &'static str,
+    pub debloat_subtitle: &'static str,
+    pub debloat_intro: &'static str,
+    pub checking_windows: &'static str,
+    pub applying_changes: &'static str,
+    pub apply_selected: &'static str,
+    pub undo: &'static str,
+    pub tag_done: &'static str,
+    pub tag_partly: &'static str,
+    pub tag_uninstalled: &'static str,
+    pub reinstall_from_store: &'static str,
+    pub debloat_done: &'static str,
+    pub permission_denied_debloat: &'static str,
     pub minimize: &'static str,
     pub close_window: &'static str,
     pub export_report: &'static str,
@@ -382,6 +396,44 @@ impl Texts {
         }
     }
 
+    pub fn debloat_section(&self, section: Section) -> &'static str {
+        match (self.language, section) {
+            (Language::PtBr, Section::DataCollection) => "Coleta de dados",
+            (Language::PtBr, Section::Ads) => "Propaganda e sugestões",
+            (Language::PtBr, Section::Ai) => "IA",
+            (Language::PtBr, Section::Background) => "Segundo plano",
+            (Language::PtBr, Section::Apps) => "Apps que vieram de brinde",
+            (Language::En, Section::DataCollection) => "Data collection",
+            (Language::En, Section::Ads) => "Ads and suggestions",
+            (Language::En, Section::Ai) => "AI",
+            (Language::En, Section::Background) => "Background",
+            (Language::En, Section::Apps) => "Bundled apps",
+        }
+    }
+
+    pub fn debloat_failure(&self, failure: &Failure) -> String {
+        let task_name = |path: &str| path.rsplit('\\').next().unwrap_or(path).to_string();
+        match (self.language, failure) {
+            (Language::PtBr, Failure::Service { name, code }) => format!("não foi possível mudar o serviço {name} ({code})"),
+            (Language::PtBr, Failure::Task { path }) => format!("não foi possível mudar a tarefa {}", task_name(path)),
+            (Language::PtBr, Failure::Registry { value, error }) => format!("não foi possível gravar {value}: {error}"),
+            (Language::PtBr, Failure::App { package }) => format!("{package} continua instalado"),
+            (Language::En, Failure::Service { name, code }) => format!("could not change the service {name} ({code})"),
+            (Language::En, Failure::Task { path }) => format!("could not change the task {}", task_name(path)),
+            (Language::En, Failure::Registry { value, error }) => format!("could not write {value}: {error}"),
+            (Language::En, Failure::App { package }) => format!("{package} is still installed"),
+        }
+    }
+
+    pub fn items_count(&self, count: usize) -> String {
+        match (self.language, count) {
+            (Language::PtBr, 1) => "1 item".to_string(),
+            (Language::PtBr, n) => format!("{n} itens"),
+            (Language::En, 1) => "1 item".to_string(),
+            (Language::En, n) => format!("{n} items"),
+        }
+    }
+
     pub fn custom_rules_count(&self, count: usize) -> String {
         match (self.language, count) {
             (Language::PtBr, 0) => "Nenhuma regra personalizada.".to_string(),
@@ -506,8 +558,10 @@ impl Texts {
         match (self.language, error) {
             (Language::PtBr, ServiceError::NoManager(code)) => format!("sem acesso ao gerenciador de serviços ({code})"),
             (Language::PtBr, ServiceError::Unavailable(code)) => format!("serviço {service} indisponível ({code})"),
+            (Language::PtBr, ServiceError::NotChanged(code)) => format!("não foi possível mudar o serviço {service} ({code})"),
             (Language::En, ServiceError::NoManager(code)) => format!("no access to the service manager ({code})"),
             (Language::En, ServiceError::Unavailable(code)) => format!("service {service} unavailable ({code})"),
+            (Language::En, ServiceError::NotChanged(code)) => format!("could not change the service {service} ({code})"),
         }
     }
 
@@ -703,6 +757,19 @@ pub static PT_BR: Texts = Texts {
     add_game_exe: "+ Adicionar jogo pelo executável",
     pick_game_title: "Escolha o executável do jogo",
     programs_filter: "Programas",
+    debloat: "Desbostificar",
+    debloat_subtitle: "Tira do Windows o que coleta dados, mostra propaganda e roda à toa. Tudo pode ser desfeito, menos a desinstalação de apps, que voltam pela Microsoft Store.",
+    debloat_intro: "Serviços e tarefas de telemetria, anúncios, IA e apps que vieram de brinde. Nada muda antes de você marcar e confirmar. Xbox e Game Bar ficam de fora.",
+    checking_windows: "Verificando o Windows…",
+    applying_changes: "Aplicando (pode pedir permissão de administrador)…",
+    apply_selected: "Aplicar selecionados",
+    undo: "Desfazer",
+    tag_done: "Feito",
+    tag_partly: "Em parte",
+    tag_uninstalled: "Desinstalado",
+    reinstall_from_store: "Reinstalar pela Store",
+    debloat_done: "Pronto. Algumas mudanças só aparecem depois de sair da conta e entrar de novo.",
+    permission_denied_debloat: "Permissão negada: os itens que precisam de administrador não foram alterados.",
     minimize: "Minimizar",
     close_window: "Fechar",
     export_report: "Exportar relatório",
@@ -840,6 +907,19 @@ pub static EN: Texts = Texts {
     add_game_exe: "+ Add a game by its executable",
     pick_game_title: "Choose the game executable",
     programs_filter: "Programs",
+    debloat: "Decrapify",
+    debloat_subtitle: "Removes what collects data, shows ads and runs for nothing. Everything can be undone except app removals, which come back from the Microsoft Store.",
+    debloat_intro: "Telemetry services and tasks, ads, AI and bundled apps. Nothing changes until you check and confirm. Xbox and Game Bar are left alone.",
+    checking_windows: "Checking Windows…",
+    applying_changes: "Applying (it may ask for administrator permission)…",
+    apply_selected: "Apply selected",
+    undo: "Undo",
+    tag_done: "Done",
+    tag_partly: "Partly",
+    tag_uninstalled: "Uninstalled",
+    reinstall_from_store: "Reinstall from the Store",
+    debloat_done: "Done. Some changes only show after signing out and back in.",
+    permission_denied_debloat: "Permission denied: the items that need administrator rights were not changed.",
     minimize: "Minimize",
     close_window: "Close",
     export_report: "Export report",
