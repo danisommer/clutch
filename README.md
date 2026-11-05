@@ -53,6 +53,7 @@ A list of the cleanups done, with space freed, and of past Game Mode sessions.
 
 - **Theme**: light, dark, or following the Windows setting (the default).
 - **Language**: Português (Brasil), English, or following Windows (the default).
+- **Recycle Bin**: optionally, whole folders and files of the Leftovers and Caution groups go to the Recycle Bin instead of being deleted. Caches and temporary files are still deleted, since recycling them would not free any space. When an item cannot be recycled (too large, or on a drive without a Recycle Bin), Windows asks before deleting it for good.
 
 ## Safety model
 
@@ -181,7 +182,7 @@ Planned:
 
 Ideas:
 
-- [ ] Option to send removed items to the Recycle Bin instead of deleting them
+- [x] Option to send removed items to the Recycle Bin instead of deleting them
 - [ ] User-defined cleanup rules in a separate file, on top of the built-in catalog
 - [ ] Per-game profiles (which programs to close, power settings)
 - [ ] Game launch from other launchers (Epic, EA app, Battle.net, Xbox app)

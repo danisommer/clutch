@@ -61,6 +61,7 @@ pub struct Config {
     pub theme: ThemeChoice,
     pub language: LanguageChoice,
     pub cleanup_choices: HashMap<String, bool>,
+    pub recycle_folders: bool,
 }
 
 impl Default for Config {
@@ -85,6 +86,7 @@ impl Default for Config {
             theme: ThemeChoice::System,
             language: LanguageChoice::System,
             cleanup_choices: HashMap::new(),
+            recycle_folders: false,
         }
     }
 }

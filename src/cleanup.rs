@@ -64,6 +64,11 @@ impl Category {
     pub fn remembers_choice(&self) -> bool {
         self.group != Group::Caution
     }
+
+    /// Whether removals of this category may go to the Recycle Bin: leftovers and caution items, which may hold user data.
+    pub fn recycles_removals(&self) -> bool {
+        matches!(self.group, Group::Leftovers | Group::Caution)
+    }
 }
 
 /// A program that must be closed before its category can be cleaned.
@@ -116,6 +121,8 @@ pub struct Tally {
     pub bytes: u64,
     pub files: u64,
     pub skipped: u64,
+    #[serde(default)]
+    pub recycled: u64,
 }
 
 impl Tally {
@@ -123,6 +130,7 @@ impl Tally {
         self.bytes += other.bytes;
         self.files += other.files;
         self.skipped += other.skipped;
+        self.recycled += other.recycled;
     }
 }
 
@@ -569,9 +577,18 @@ fn measure(operation: &Operation) -> Option<Tally> {
     }
 }
 
-fn execute(operation: &Operation, texts: &Texts) -> Result<Tally, String> {
+/// Moves a folder or file to the Recycle Bin; its size is counted as recycled, not freed.
+fn recycle(path: &Path, texts: &Texts) -> Result<Tally, String> {
+    let measured = sweep(path, 0, &[], false, false);
+    system::send_to_recycle_bin(path).map_err(|e| texts.could_not_recycle(e))?;
+    Ok(Tally { bytes: 0, files: measured.files, skipped: 0, recycled: measured.bytes })
+}
+
+/// Runs an operation. With `recycle_removals`, removals go to the Recycle Bin instead of being deleted.
+fn execute(operation: &Operation, recycle_removals: bool, texts: &Texts) -> Result<Tally, String> {
     match operation {
         Operation::Contents { path, age_hours, exclude } => Ok(sweep(path, *age_hours, exclude, true, false)),
+        Operation::Remove(p) if recycle_removals => recycle(p, texts),
         Operation::Remove(p) => Ok(sweep(p, 0, &[], true, true)),
         Operation::WindowsUpdate(p) => {
             let was_running = system::stop_service("wuauserv").map_err(|e| texts.service_error("wuauserv", e))?;
@@ -586,7 +603,7 @@ fn execute(operation: &Operation, texts: &Texts) -> Result<Tally, String> {
             system::run_hidden("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", "Delete-DeliveryOptimizationCache -Force"])
                 .map_err(|e| texts.could_not_clean(&e.to_string()))?;
             let after = sweep(p, 0, &[], false, false);
-            Ok(Tally { bytes: before.bytes.saturating_sub(after.bytes), files: before.files.saturating_sub(after.files), skipped: 0 })
+            Ok(Tally { bytes: before.bytes.saturating_sub(after.bytes), files: before.files.saturating_sub(after.files), ..Default::default() })
         }
         Operation::ComponentStore => {
             let before = system::free_space("C:\\").unwrap_or(0);
@@ -596,7 +613,7 @@ fn execute(operation: &Operation, texts: &Texts) -> Result<Tally, String> {
                 return Err(texts.dism_exit_code(output.status.code().unwrap_or(-1)));
             }
             let after = system::free_space("C:\\").unwrap_or(0);
-            Ok(Tally { bytes: after.saturating_sub(before), files: 0, skipped: 0 })
+            Ok(Tally { bytes: after.saturating_sub(before), ..Default::default() })
         }
     }
 }
@@ -715,7 +732,8 @@ pub struct CleanupResult {
 }
 
 /// Cleans the chosen categories. Without elevation only the user targets run; elevated, only the admin targets.
-pub fn clean(ids: &[String], elevated: bool, texts: &Texts, progress: &dyn Fn(&str)) -> Vec<CleanupResult> {
+/// With `recycle_folders`, whole folders and files of the Leftovers and Caution groups go to the Recycle Bin.
+pub fn clean(ids: &[String], elevated: bool, recycle_folders: bool, texts: &Texts, progress: &dyn Fn(&str)) -> Vec<CleanupResult> {
     let rules = Rules::load();
     let installed = installed_lowercase();
     let processes = system::processes();
@@ -733,7 +751,7 @@ pub fn clean(ids: &[String], elevated: bool, texts: &Texts, progress: &dyn Fn(&s
             }
             for target in category.targets.iter().filter(|t| t.admin == elevated && applies(t, &installed)) {
                 for operation in operations(target, &rules).0 {
-                    match execute(&operation, texts) {
+                    match execute(&operation, recycle_folders && category.recycles_removals(), texts) {
                         Ok(t) => result.tally.add(t),
                         Err(e) => result.error = Some(e),
                     }

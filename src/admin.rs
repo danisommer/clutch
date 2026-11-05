@@ -19,6 +19,7 @@ const EXIT_WRITE_FAILED: i32 = 3;
 #[derive(Serialize, Deserialize)]
 struct CleanRequest {
     ids: Vec<String>,
+    recycle_folders: bool,
     language: Language,
 }
 
@@ -58,7 +59,7 @@ pub fn run(args: &[String]) -> i32 {
             let Some(request) = read_request(&input) else { return EXIT_BAD_ARGS };
             let catalog = cleanup::catalog();
             let known: Vec<String> = request.ids.into_iter().filter(|id| catalog.categories.iter().any(|c| &c.id == id)).collect();
-            write_result(&output, &cleanup::clean(&known, true, i18n::texts(request.language), &|_| {}))
+            write_result(&output, &cleanup::clean(&known, true, request.recycle_folders, i18n::texts(request.language), &|_| {}))
         }
         _ => EXIT_BAD_ARGS,
     }
@@ -90,10 +91,10 @@ pub fn measure_system() -> Result<HashMap<String, u64>, AdminError> {
 }
 
 /// Asks for elevation and cleans the system targets of the chosen categories.
-pub fn clean_system(ids: &[String], language: Language) -> Result<Vec<cleanup::CleanupResult>, AdminError> {
+pub fn clean_system(ids: &[String], recycle_folders: bool, language: Language) -> Result<Vec<cleanup::CleanupResult>, AdminError> {
     let input = exchange_dir().join("request.json");
     let output = exchange_dir().join("result.json");
-    let request = CleanRequest { ids: ids.to_vec(), language };
+    let request = CleanRequest { ids: ids.to_vec(), recycle_folders, language };
     let bytes = serde_json::to_vec(&request).map_err(|e| AdminError::Io(e.to_string()))?;
     fs::write(&input, bytes).map_err(|e| AdminError::Io(e.to_string()))?;
     invoke(format!("{ARG} clean \"{}\" \"{}\"", input.display(), output.display()), &output)

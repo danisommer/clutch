@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,9 +46,10 @@ use windows_sys::Win32::System::Threading::{
     QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{
+    FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING,
     FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures,
-    FOLDERID_Videos, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SHGetKnownFolderPath,
-    ShellExecuteExW, ShellExecuteW,
+    FOLDERID_Videos, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SHFILEOPSTRUCTW, SHFileOperationW,
+    SHGetKnownFolderPath, ShellExecuteExW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GW_OWNER, GetWindow, GetWindowTextLengthW, GetWindowTextW,
@@ -542,6 +544,28 @@ pub fn shell_open(target: &str) -> bool {
         ShellExecuteW(std::ptr::null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL)
     };
     result as isize > 32
+}
+
+/// Why an item did not reach the Recycle Bin.
+#[derive(Clone, Copy, Debug)]
+pub enum RecycleError {
+    Declined,
+    Failed(i32),
+}
+
+/// Moves a file or folder to the Recycle Bin. When it cannot be recycled, Windows asks before deleting it for good.
+pub fn send_to_recycle_bin(path: &Path) -> Result<(), RecycleError> {
+    let from: Vec<u16> = path.as_os_str().encode_wide().chain([0, 0]).collect();
+    let flags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_WANTNUKEWARNING;
+    let mut operation: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };
+    operation.wFunc = FO_DELETE;
+    operation.pFrom = from.as_ptr();
+    operation.fFlags = flags as u16;
+    match (unsafe { SHFileOperationW(&mut operation) }, operation.fAnyOperationsAborted) {
+        (0, 0) => Ok(()),
+        (0, _) => Err(RecycleError::Declined),
+        (code, _) => Err(RecycleError::Failed(code)),
+    }
 }
 
 #[derive(Debug)]

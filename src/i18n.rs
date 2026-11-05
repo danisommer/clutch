@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::admin::AdminError;
 use crate::cleanup::Group;
 use crate::storage::{HistoryDate, HistoryKind, LanguageChoice, Stamp, Summary, format_duration};
-use crate::system::{self, PowerMode, ServiceError};
+use crate::system::{self, PowerMode, RecycleError, ServiceError};
 
 const LANG_PORTUGUESE: u16 = 0x16;
 const PRIMARY_LANGUAGE_MASK: u16 = 0x3FF;
@@ -188,6 +188,8 @@ pub struct Texts {
     pub language_section: &'static str,
     pub selection_remembered: &'static str,
     pub reset_selection: &'static str,
+    pub recycle_folders: &'static str,
+    pub recycle_folders_hint: &'static str,
 }
 
 impl Texts {
@@ -341,6 +343,22 @@ impl Texts {
             (Language::PtBr, n) => format!("{n} categorias"),
             (Language::En, 1) => "1 category".to_string(),
             (Language::En, n) => format!("{n} categories"),
+        }
+    }
+
+    pub fn in_recycle_bin(&self, size: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("{size} na Lixeira"),
+            Language::En => format!("{size} in the Recycle Bin"),
+        }
+    }
+
+    pub fn could_not_recycle(&self, error: RecycleError) -> String {
+        match (self.language, error) {
+            (Language::PtBr, RecycleError::Declined) => "não foi para a Lixeira e foi mantido".to_string(),
+            (Language::PtBr, RecycleError::Failed(code)) => format!("não foi possível mandar para a Lixeira ({code})"),
+            (Language::En, RecycleError::Declined) => "did not go to the Recycle Bin and was kept".to_string(),
+            (Language::En, RecycleError::Failed(code)) => format!("could not send to the Recycle Bin ({code})"),
         }
     }
 
@@ -560,6 +578,8 @@ pub static PT_BR: Texts = Texts {
     language_section: "Idioma",
     selection_remembered: "A limpeza lembra o que você marcou da última vez. Itens de Atenção sempre começam desmarcados.",
     reset_selection: "Voltar à seleção padrão",
+    recycle_folders: "Mandar pastas removidas para a Lixeira",
+    recycle_folders_hint: "Vale para os grupos Restos e Atenção. O espaço só volta quando a Lixeira for esvaziada.",
 };
 
 pub static EN: Texts = Texts {
@@ -684,6 +704,8 @@ pub static EN: Texts = Texts {
     language_section: "Language",
     selection_remembered: "Cleanup remembers what you checked last time. Caution items always start unchecked.",
     reset_selection: "Back to the default selection",
+    recycle_folders: "Send removed folders to the Recycle Bin",
+    recycle_folders_hint: "Applies to the Leftovers and Caution groups. The space only comes back when the Recycle Bin is emptied.",
 };
 
 #[cfg(test)]

@@ -308,6 +308,7 @@ impl App {
         self.cleanup_phase = CleanupPhase::Cleaning;
         self.cleanup_warning = None;
         let t = self.t;
+        let recycle_folders = self.config.recycle_folders;
         let selected: Vec<&Category> = self.catalog.categories.iter().filter(|c| self.selection.contains(&c.id)).collect();
         let ids: Vec<String> = selected.iter().map(|c| c.id.clone()).collect();
         let admin_ids: Vec<String> = selected.iter().filter(|c| c.targets.iter().any(|t| t.admin)).map(|c| c.id.clone()).collect();
@@ -316,11 +317,11 @@ impl App {
                 let _ = tx.send(Message::CleanupProgress(name.into()));
                 ctx.request_repaint();
             };
-            let mut by_id: HashMap<String, CleanupResult> = cleanup::clean(&ids, false, t, &progress).into_iter().map(|r| (r.id.clone(), r)).collect();
+            let mut by_id: HashMap<String, CleanupResult> = cleanup::clean(&ids, false, recycle_folders, t, &progress).into_iter().map(|r| (r.id.clone(), r)).collect();
             let mut warning = None;
             if !admin_ids.is_empty() {
                 progress(t.system_items_waiting);
-                match admin::clean_system(&admin_ids, t.language) {
+                match admin::clean_system(&admin_ids, recycle_folders, t.language) {
                     Ok(admin_results) => {
                         for r in admin_results {
                             let entry = by_id.entry(r.id.clone()).or_insert_with(|| CleanupResult { id: r.id.clone(), ..Default::default() });
@@ -846,8 +847,12 @@ impl App {
         let pal = palette(ui.ctx());
         let t = self.t;
         let freed: u64 = self.results.iter().map(|r| r.tally.bytes).sum();
+        let recycled: u64 = self.results.iter().map(|r| r.tally.recycled).sum();
         section_label(ui, t.freed);
         ui.label(text(t.size(freed), light(72.0), pal.text));
+        if recycled > 0 {
+            ui.label(text(format!("+ {}", t.in_recycle_bin(&t.size(recycled))), semibold(15.0), pal.text_muted));
+        }
         if let Some(warning) = &self.cleanup_warning {
             ui.label(text(warning, semibold(13.0), pal.accent_text));
         }
@@ -930,6 +935,11 @@ impl App {
     fn cleanup_settings(&mut self, ui: &mut Ui) {
         let pal = palette(ui.ctx());
         let t = self.t;
+        if checkbox(ui, &mut self.config.recycle_folders, t.recycle_folders, true).changed() {
+            self.save_config();
+        }
+        ui.label(text(format!("→ {}", t.recycle_folders_hint), regular(12.5), pal.text_muted));
+        ui.add_space(12.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(text(t.selection_remembered, regular(13.0), pal.text_muted));
             if !self.config.cleanup_choices.is_empty() && link(ui, t.reset_selection, pal.accent_text).clicked() {
@@ -1084,9 +1094,11 @@ fn category_row(ui: &mut Ui, t: &Texts, category: &Category, analysis: &Analysis
 }
 
 fn result_item(t: &Texts, name: String, result: &CleanupResult) -> Item {
-    let value = match result.tally.bytes {
-        0 => t.nothing_removed.to_string(),
-        bytes => t.size(bytes),
+    let value = match (result.tally.bytes, result.tally.recycled) {
+        (0, 0) => t.nothing_removed.to_string(),
+        (0, recycled) => t.in_recycle_bin(&t.size(recycled)),
+        (bytes, 0) => t.size(bytes),
+        (bytes, recycled) => format!("{} + {}", t.size(bytes), t.in_recycle_bin(&t.size(recycled))),
     };
     let hint = match (&result.error, result.tally.skipped) {
         (Some(error), _) => Some(error.clone()),
