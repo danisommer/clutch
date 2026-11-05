@@ -16,7 +16,7 @@ use eframe::egui::{
 use crate::admin::{self, AdminError};
 use crate::cleanup::{self, Analysis, Catalog, Category, CleanupResult, Group};
 use crate::game_mode::{self, Item, Status};
-use crate::storage::{self, ChosenGame, Config, Force, HistoryEntry, HistoryKind, ProgramConfig, Session};
+use crate::storage::{self, ChosenGame, Config, Force, HistoryEntry, HistoryKind, ProgramConfig, Session, ThemeChoice};
 use crate::theme::{self, *};
 use crate::{steam, system, watcher};
 
@@ -30,6 +30,7 @@ enum Page {
     GameMode,
     Cleanup,
     History,
+    Settings,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -116,12 +117,13 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext) -> Self {
-        theme::apply(&cc.egui_ctx);
+        let config = storage::load_config();
+        theme::apply(&cc.egui_ctx, config.theme);
         let (tx, rx) = mpsc::channel();
         let session = storage::load_session();
         let mut app = App {
             page: Page::GameMode,
-            config: storage::load_config(),
+            config,
             catalog: cleanup::catalog(),
             tx,
             rx,
@@ -421,6 +423,7 @@ impl App {
     }
 
     fn title_bar(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let pal = palette(ctx);
         let rect = ui.max_rect();
         let drag = ui.interact(rect, Id::new("drag"), Sense::CLICK | Sense::DRAG);
         if drag.drag_started() {
@@ -433,15 +436,15 @@ impl App {
         let close_response = ui.interact(close, Id::new("close"), Sense::CLICK).on_hover_cursor(CursorIcon::PointingHand);
         let painter = ui.painter();
         if minimize_response.hovered() {
-            painter.rect_filled(minimize, CornerRadius::ZERO, SURFACE);
+            painter.rect_filled(minimize, CornerRadius::ZERO, pal.surface);
         }
         if close_response.hovered() {
-            painter.rect_filled(close, CornerRadius::ZERO, RED);
+            painter.rect_filled(close, CornerRadius::ZERO, pal.accent);
         }
         let c = minimize.center();
-        painter.line_segment([c - Vec2::new(5.0, 0.0), c + Vec2::new(5.0, 0.0)], stroke(1.2, TEXT));
+        painter.line_segment([c - Vec2::new(5.0, 0.0), c + Vec2::new(5.0, 0.0)], stroke(1.2, pal.text));
         let c = close.center();
-        let color = if close_response.hovered() { WHITE } else { TEXT };
+        let color = if close_response.hovered() { pal.on_accent } else { pal.text };
         painter.line_segment([c - Vec2::splat(5.0), c + Vec2::splat(5.0)], stroke(1.2, color));
         painter.line_segment([c + Vec2::new(-5.0, 5.0), c + Vec2::new(5.0, -5.0)], stroke(1.2, color));
         if minimize_response.clicked() {
@@ -453,14 +456,15 @@ impl App {
     }
 
     fn navigation(&mut self, ui: &mut Ui) {
+        let pal = palette(ui.ctx());
         ui.add_space(14.0);
-        ui.label(text("Modo Jogo", semibold(24.0), TEXT));
-        ui.label(text("e Limpeza", semibold(24.0), TEXT_FAINT));
+        ui.label(text("Modo Jogo", semibold(24.0), pal.text));
+        ui.label(text("e Limpeza", semibold(24.0), pal.text_faint));
         ui.add_space(16.0);
         let (bar, _) = ui.allocate_exact_size(Vec2::new(28.0, 4.0), Sense::hover());
-        ui.painter().rect_filled(bar, CornerRadius::ZERO, RED);
+        ui.painter().rect_filled(bar, CornerRadius::ZERO, pal.accent);
         ui.add_space(48.0);
-        for (number, page, name) in [(1, Page::GameMode, "Modo Jogo"), (2, Page::Cleanup, "Limpeza"), (3, Page::History, "Histórico")] {
+        for (number, page, name) in [(1, Page::GameMode, "Modo Jogo"), (2, Page::Cleanup, "Limpeza"), (3, Page::History, "Histórico"), (4, Page::Settings, "Configurações")] {
             if nav_item(ui, number, name, self.page == page).clicked() {
                 self.page = page;
                 if page == Page::History {
@@ -469,11 +473,11 @@ impl App {
             }
         }
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.label(text(format!("v{}", env!("CARGO_PKG_VERSION")), regular(11.0), TEXT_FAINT));
+            ui.label(text(format!("v{}", env!("CARGO_PKG_VERSION")), regular(11.0), pal.text_faint));
             ui.add_space(14.0);
             if let Some(free) = self.free_space_c {
-                ui.label(text(format!("{} livres", storage::format_size(free)), semibold(18.0), TEXT));
-                ui.label(text("DISCO C:", semibold(10.5), TEXT_MUTED).extra_letter_spacing(1.4));
+                ui.label(text(format!("{} livres", storage::format_size(free)), semibold(18.0), pal.text));
+                ui.label(text("DISCO C:", semibold(10.5), pal.text_muted).extra_letter_spacing(1.4));
             }
         });
     }
@@ -521,6 +525,7 @@ impl App {
     }
 
     fn game_ready(&mut self, ui: &mut Ui) -> Option<GameAction> {
+        let pal = palette(ui.ctx());
         heading(ui, "Modo Jogo", "Fecha programas pesados, desliga a WSL e ajusta a energia para jogar.");
         let mut action = None;
         let width = ui.available_width();
@@ -534,7 +539,7 @@ impl App {
                 ui.horizontal(|ui| {
                     section_label(ui, "Estado");
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        if link(ui, "Atualizar", TEXT_MUTED).clicked() {
+                        if link(ui, "Atualizar", pal.text_muted).clicked() {
                             action = Some(GameAction::Refresh);
                         }
                     });
@@ -568,7 +573,7 @@ impl App {
                         ui.horizontal(|ui| {
                             changed |= checkbox(ui, &mut program.enabled, &program.name, true).changed();
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if link(ui, "Remover", TEXT_FAINT).clicked() {
+                                if link(ui, "Remover", pal.text_faint).clicked() {
                                     remove = Some(index);
                                 }
                             });
@@ -580,18 +585,18 @@ impl App {
                     ui.add_space(4.0);
                     match &self.candidates {
                         None => {
-                            if link(ui, "+ Adicionar programa aberto", RED).clicked() {
+                            if link(ui, "+ Adicionar programa aberto", pal.accent_text).clicked() {
                                 action = Some(GameAction::FindCandidates);
                             }
                         }
                         Some(list) if list.is_empty() => {
-                            ui.label(text("Nenhum outro programa com janela aberta.", regular(13.0), TEXT_MUTED));
+                            ui.label(text("Nenhum outro programa com janela aberta.", regular(13.0), pal.text_muted));
                         }
                         Some(list) => {
-                            ui.label(text("Escolha o programa:", regular(13.0), TEXT_MUTED));
+                            ui.label(text("Escolha o programa:", regular(13.0), pal.text_muted));
                             for (process, window_title) in list {
                                 let label = format!("+ {process}  ·  {}", shorten(window_title, 34));
-                                if link(ui, &label, RED).clicked() {
+                                if link(ui, &label, pal.accent_text).clicked() {
                                     action = Some(GameAction::Add(process.clone()));
                                 }
                             }
@@ -633,26 +638,27 @@ impl App {
     }
 
     fn game_active(&mut self, ui: &mut Ui) -> Option<GameAction> {
+        let pal = palette(ui.ctx());
         let mut action = None;
         let Some(session) = &self.session else { return Some(GameAction::Back) };
-        ui.label(text("Modo Jogo", semibold(40.0), TEXT));
+        ui.label(text("Modo Jogo", semibold(40.0), pal.text));
         ui.add_space(4.0);
-        tag(ui, "Ativo", RED);
+        tag(ui, "Ativo", pal.accent_text);
         ui.add_space(26.0);
         let elapsed = storage::now_epoch().saturating_sub(session.started_at);
-        ui.label(text(storage::format_duration(elapsed), light(72.0), TEXT));
+        ui.label(text(storage::format_duration(elapsed), light(72.0), pal.text));
         let status_line = match (&session.game, self.game_running) {
             (Some(g), true) => format!("{} em execução. O Modo Jogo encerra sozinho quando o jogo fechar.", g.name),
             (Some(g), false) => format!("Aguardando {} abrir.", g.name),
             (None, _) => "Nenhum jogo escolhido. Encerre quando terminar de jogar.".to_string(),
         };
-        ui.label(text(status_line, regular(15.0), TEXT_MUTED));
+        ui.label(text(status_line, regular(15.0), pal.text_muted));
         if let Some(deadline) = self.close_at {
             let remaining = deadline.saturating_duration_since(Instant::now()).as_secs() + 1;
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label(text(format!("Esta janela fecha em {remaining} s para liberar memória. O Modo Jogo continua ativo."), regular(13.0), TEXT_MUTED));
-                if link(ui, "Manter aberta", RED).clicked() {
+                ui.label(text(format!("Esta janela fecha em {remaining} s para liberar memória. O Modo Jogo continua ativo."), regular(13.0), pal.text_muted));
+                if link(ui, "Manter aberta", pal.accent_text).clicked() {
                     action = Some(GameAction::KeepOpen);
                 }
             });
@@ -664,7 +670,7 @@ impl App {
         egui::ScrollArea::vertical().id_salt("activation").max_height(height).show(ui, |ui| {
             if self.activation_items.is_empty() {
                 ui.add_space(10.0);
-                ui.label(text("Sessão retomada depois que o app foi reaberto.", regular(14.0), TEXT_MUTED));
+                ui.label(text("Sessão retomada depois que o app foi reaberto.", regular(14.0), pal.text_muted));
             }
             for item in &self.activation_items {
                 item_row(ui, item, 196.0);
@@ -678,12 +684,13 @@ impl App {
     }
 
     fn game_finished(&mut self, ui: &mut Ui) -> Option<GameAction> {
+        let pal = palette(ui.ctx());
         heading(ui, "Modo Jogo", "Encerrado. O computador voltou ao normal.");
         section_label(ui, "Ao encerrar");
         rule(ui);
         if self.deactivation_items.is_empty() {
             ui.add_space(10.0);
-            ui.label(text("Nada precisou ser restaurado.", regular(14.0), TEXT_MUTED));
+            ui.label(text("Nada precisou ser restaurado.", regular(14.0), pal.text_muted));
             ui.add_space(10.0);
         }
         for item in &self.deactivation_items {
@@ -694,10 +701,11 @@ impl App {
     }
 
     fn cleanup_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let pal = palette(ui.ctx());
         heading(ui, "Limpeza", "Analise o que pode ser removido e marque o que limpar. Nada é apagado sem você confirmar.");
         let action = match self.cleanup_phase {
             CleanupPhase::Idle => {
-                ui.label(text("Arquivos temporários, caches de programas e restos de instalações.", regular(14.0), TEXT_MUTED));
+                ui.label(text("Arquivos temporários, caches de programas e restos de instalações.", regular(14.0), pal.text_muted));
                 ui.add_space(20.0);
                 primary_button(ui, "Analisar", 200.0, true).clicked().then_some(CleanupAction::Analyze)
             }
@@ -729,31 +737,32 @@ impl App {
     }
 
     fn cleanup_list(&mut self, ui: &mut Ui) -> Option<CleanupAction> {
+        let pal = palette(ui.ctx());
         let mut action = None;
         let found: u64 = self.analyses.iter().map(Analysis::total).sum();
         let admin_pending = self.analyses.iter().any(Analysis::admin_pending);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 section_label(ui, "Encontrado");
-                ui.label(text(storage::format_size(found), light(44.0), TEXT));
+                ui.label(text(storage::format_size(found), light(44.0), pal.text));
             });
             ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-                if link(ui, "Analisar de novo", TEXT_MUTED).clicked() {
+                if link(ui, "Analisar de novo", pal.text_muted).clicked() {
                     action = Some(CleanupAction::Analyze);
                 }
                 if admin_pending {
                     ui.add_space(16.0);
-                    if link(ui, "Medir itens do sistema", RED).on_hover_text("Pede permissão de administrador").clicked() {
+                    if link(ui, "Medir itens do sistema", pal.accent_text).on_hover_text("Pede permissão de administrador").clicked() {
                         action = Some(CleanupAction::MeasureSystem);
                     }
                 }
             });
         });
         if let Some(warning) = &self.cleanup_warning {
-            ui.label(text(warning, semibold(13.0), RED));
+            ui.label(text(warning, semibold(13.0), pal.accent_text));
         }
         for item in &self.blocker_items {
-            ui.label(text(format!("{}: {}", item.label, item.value), regular(13.0), status_color(item.status)));
+            ui.label(text(format!("{}: {}", item.label, item.value), regular(13.0), status_color(pal, item.status)));
         }
         ui.add_space(14.0);
         let height = ui.available_height() - 104.0;
@@ -789,7 +798,7 @@ impl App {
             ui.vertical(|ui| {
                 section_label(ui, "Selecionado");
                 let extra = if selected_has_unknown { " + sistema" } else { "" };
-                ui.label(text(format!("{}{extra}", storage::format_size(selected)), semibold(24.0), TEXT));
+                ui.label(text(format!("{}{extra}", storage::format_size(selected)), semibold(24.0), pal.text));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if primary_button(ui, "Limpar selecionados", 240.0, !self.selection.is_empty()).clicked() {
@@ -801,11 +810,12 @@ impl App {
     }
 
     fn cleanup_results(&mut self, ui: &mut Ui) -> Option<CleanupAction> {
+        let pal = palette(ui.ctx());
         let freed: u64 = self.results.iter().map(|r| r.tally.bytes).sum();
         section_label(ui, "Liberado");
-        ui.label(text(storage::format_size(freed), light(72.0), TEXT));
+        ui.label(text(storage::format_size(freed), light(72.0), pal.text));
         if let Some(warning) = &self.cleanup_warning {
-            ui.label(text(warning, semibold(13.0), RED));
+            ui.label(text(warning, semibold(13.0), pal.accent_text));
         }
         ui.add_space(20.0);
         let height = ui.available_height() - 90.0;
@@ -821,9 +831,10 @@ impl App {
     }
 
     fn history_page(&mut self, ui: &mut Ui) {
+        let pal = palette(ui.ctx());
         heading(ui, "Histórico", "Limpezas feitas e sessões de Modo Jogo.");
         if self.history.is_empty() {
-            ui.label(text("Nada por aqui ainda.", regular(14.0), TEXT_MUTED));
+            ui.label(text("Nada por aqui ainda.", regular(14.0), pal.text_muted));
             return;
         }
         rule(ui);
@@ -833,12 +844,12 @@ impl App {
             for entry in &self.history {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    column(ui, 150.0, text(&entry.date, regular(13.0), TEXT_MUTED));
-                    column(ui, 120.0, text(entry.kind.label(), semibold(14.0), TEXT));
-                    ui.label(text(&entry.summary, regular(13.0), TEXT_MUTED));
+                    column(ui, 150.0, text(&entry.date, regular(13.0), pal.text_muted));
+                    column(ui, 120.0, text(entry.kind.label(), semibold(14.0), pal.text));
+                    ui.label(text(&entry.summary, regular(13.0), pal.text_muted));
                     if entry.freed > 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(text(storage::format_size(entry.freed), semibold(14.0), TEXT));
+                            ui.label(text(storage::format_size(entry.freed), semibold(14.0), pal.text));
                         });
                     }
                 });
@@ -846,6 +857,20 @@ impl App {
                 rule(ui);
             }
         });
+    }
+
+    fn settings_page(&mut self, ui: &mut Ui) {
+        heading(ui, "Configurações", "Aparência e preferências do app.");
+        section_label(ui, "Tema");
+        rule(ui);
+        ui.add_space(8.0);
+        for (choice, label) in [(ThemeChoice::System, "Seguir o Windows"), (ThemeChoice::Light, "Claro"), (ThemeChoice::Dark, "Escuro")] {
+            if radio(ui, self.config.theme == choice, label).clicked() && self.config.theme != choice {
+                self.config.theme = choice;
+                theme::set_theme(ui.ctx(), choice);
+                self.save_config();
+            }
+        }
     }
 
     /// When the watcher ends the session while the window is open, shows the summary it left.
@@ -884,6 +909,7 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let pal = palette(ctx);
         self.receive(ctx);
         if self.game_phase == GamePhase::Active {
             ctx.request_repaint_after(Duration::from_secs(1));
@@ -895,45 +921,48 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("title_bar")
             .exact_height(TITLE_BAR_HEIGHT)
             .show_separator_line(false)
-            .frame(Frame::new().fill(BACKGROUND))
+            .frame(Frame::new().fill(pal.background))
             .show(ctx, |ui| self.title_bar(ui, ctx));
         egui::SidePanel::left("navigation")
             .exact_width(NAV_WIDTH)
             .resizable(false)
             .show_separator_line(false)
-            .frame(Frame::new().fill(BACKGROUND).inner_margin(Margin { left: 40, right: 16, top: 4, bottom: 32 }))
+            .frame(Frame::new().fill(pal.background).inner_margin(Margin { left: 40, right: 16, top: 4, bottom: 32 }))
             .show(ctx, |ui| self.navigation(ui));
         egui::CentralPanel::default()
-            .frame(Frame::new().fill(BACKGROUND).inner_margin(Margin { left: 48, right: 56, top: 4, bottom: 32 }))
+            .frame(Frame::new().fill(pal.background).inner_margin(Margin { left: 48, right: 56, top: 4, bottom: 32 }))
             .show(ctx, |ui| match self.page {
                 Page::GameMode => self.game_mode_page(ui, ctx),
                 Page::Cleanup => self.cleanup_page(ui, ctx),
                 Page::History => self.history_page(ui),
+                Page::Settings => self.settings_page(ui),
             });
         let screen = ctx.screen_rect();
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("borders")));
-        painter.rect_stroke(screen, CornerRadius::ZERO, stroke(1.0, RULE), StrokeKind::Inside);
+        painter.rect_stroke(screen, CornerRadius::ZERO, stroke(1.0, pal.rule), StrokeKind::Inside);
         let x = screen.left() + NAV_WIDTH;
-        painter.line_segment([Pos2::new(x, screen.top() + TITLE_BAR_HEIGHT), Pos2::new(x, screen.bottom() - 32.0)], stroke(1.0, RULE));
+        painter.line_segment([Pos2::new(x, screen.top() + TITLE_BAR_HEIGHT), Pos2::new(x, screen.bottom() - 32.0)], stroke(1.0, pal.rule));
     }
 }
 
 fn nav_item(ui: &mut Ui, number: u32, name: &str, active: bool) -> Response {
+    let pal = palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::CLICK);
     let hovered = response.hovered();
     let painter = ui.painter();
-    let number_color = if active { RED } else { TEXT_FAINT };
+    let number_color = if active { pal.accent_text } else { pal.text_faint };
     painter.text(Pos2::new(rect.left(), rect.center().y), Align2::LEFT_CENTER, format!("{number:02}"), semibold(12.0), number_color);
     let (font, color) = match (active, hovered) {
-        (true, _) => (semibold(16.0), TEXT),
-        (false, true) => (regular(16.0), TEXT),
-        (false, false) => (regular(16.0), TEXT_MUTED),
+        (true, _) => (semibold(16.0), pal.text),
+        (false, true) => (regular(16.0), pal.text),
+        (false, false) => (regular(16.0), pal.text_muted),
     };
     painter.text(Pos2::new(rect.left() + 34.0, rect.center().y), Align2::LEFT_CENTER, name, font, color);
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 fn category_row(ui: &mut Ui, category: &Category, analysis: &Analysis, selection: &mut HashSet<String>) -> Option<CleanupAction> {
+    let pal = palette(ui.ctx());
     let mut action = None;
     let blocked = !analysis.blockers.is_empty();
     ui.add_space(12.0);
@@ -950,25 +979,25 @@ fn category_row(ui: &mut Ui, category: &Category, analysis: &Analysis, selection
         ui.vertical(|ui| {
             ui.set_width(text_width);
             ui.horizontal(|ui| {
-                ui.label(text(&category.name, semibold(14.5), if blocked { TEXT_FAINT } else { TEXT }));
+                ui.label(text(&category.name, semibold(14.5), if blocked { pal.text_faint } else { pal.text }));
                 if analysis.has_admin {
-                    tag(ui, "Admin", TEXT_MUTED);
+                    tag(ui, "Admin", pal.text_muted);
                 }
                 if category.slow {
-                    tag(ui, "Demorado", TEXT_MUTED);
+                    tag(ui, "Demorado", pal.text_muted);
                 }
                 if category.group == Group::Caution {
-                    tag(ui, "Atenção", RED);
+                    tag(ui, "Atenção", pal.accent_text);
                 }
             });
-            ui.add(egui::Label::new(text(&category.description, regular(12.5), TEXT_MUTED)).wrap());
+            ui.add(egui::Label::new(text(&category.description, regular(12.5), pal.text_muted)).wrap());
             if !analysis.details.is_empty() {
-                ui.add(egui::Label::new(text(analysis.details.join("  ·  "), regular(12.0), TEXT_MUTED)).wrap());
+                ui.add(egui::Label::new(text(analysis.details.join("  ·  "), regular(12.0), pal.text_muted)).wrap());
             }
             if blocked {
                 ui.horizontal(|ui| {
-                    ui.label(text(format!("Feche {} para limpar.", analysis.blockers.join(", ")), semibold(12.5), RED));
-                    if link(ui, "Fechar agora", RED).clicked() {
+                    ui.label(text(format!("Feche {} para limpar.", analysis.blockers.join(", ")), semibold(12.5), pal.accent_text));
+                    if link(ui, "Fechar agora", pal.accent_text).clicked() {
                         action = Some(CleanupAction::CloseBlockers(category.id.clone()));
                     }
                 });
@@ -976,9 +1005,9 @@ fn category_row(ui: &mut Ui, category: &Category, analysis: &Analysis, selection
         });
         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
             let (value, color) = match (analysis.total(), analysis.unknown_size || analysis.admin_pending()) {
-                (0, true) => ("—".to_string(), TEXT_FAINT),
-                (bytes, true) => (format!("{}+", storage::format_size(bytes)), TEXT),
-                (bytes, false) => (storage::format_size(bytes), TEXT),
+                (0, true) => ("—".to_string(), pal.text_faint),
+                (bytes, true) => (format!("{}+", storage::format_size(bytes)), pal.text),
+                (bytes, false) => (storage::format_size(bytes), pal.text),
             };
             ui.label(text(value, semibold(14.5), color));
         });

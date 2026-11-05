@@ -48,6 +48,10 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
 
 A list of the cleanups done, with space freed, and of past Game Mode sessions.
 
+### Settings
+
+- **Theme**: light, dark, or following the Windows setting (the default).
+
 ## Safety model
 
 Deleting files is the riskiest thing this app does, so the rules are enforced in code, not only in the catalog:
@@ -165,7 +169,7 @@ This is an early version. The safety rules have unit tests, but the elevated cle
 Planned:
 
 - [x] Downloadable releases (prebuilt executables on GitHub Releases)
-- [ ] Dark mode
+- [x] Dark mode
 - [ ] Multiple languages, starting with English
 - [ ] Support for more CPU and GPU vendors (NVIDIA and Intel shader caches, vendor tools)
 - [ ] Support for more laptop vendors' performance modes (ASUS, MSI, Dell, HP, Acer…)

@@ -4,32 +4,93 @@ use std::sync::Arc;
 
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, CursorIcon, FontData, FontDefinitions, FontFamily, FontId,
-    Pos2, Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
+    Pos2, Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Theme, ThemePreference, Ui, Vec2,
 };
 
 use crate::game_mode::{Item, Status};
+use crate::storage::ThemeChoice;
 
-pub const BACKGROUND: Color32 = Color32::from_rgb(244, 243, 239);
-pub const SURFACE: Color32 = Color32::from_rgb(234, 232, 226);
-pub const TEXT: Color32 = Color32::from_rgb(20, 20, 20);
-pub const TEXT_MUTED: Color32 = Color32::from_rgb(112, 110, 104);
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(168, 165, 158);
-pub const RULE: Color32 = Color32::from_rgb(220, 217, 209);
-pub const RED: Color32 = Color32::from_rgb(227, 0, 27);
-pub const RED_DARK: Color32 = Color32::from_rgb(186, 0, 22);
-pub const WHITE: Color32 = Color32::WHITE;
+/// Colors of one theme. `accent` fills buttons and marks; `accent_text` is the accent used for text and lines.
+pub struct Palette {
+    pub background: Color32,
+    pub surface: Color32,
+    pub text: Color32,
+    pub text_muted: Color32,
+    pub text_faint: Color32,
+    pub rule: Color32,
+    pub accent: Color32,
+    pub accent_hover: Color32,
+    pub accent_text: Color32,
+    pub on_accent: Color32,
+}
+
+pub static LIGHT: Palette = Palette {
+    background: Color32::from_rgb(244, 243, 239),
+    surface: Color32::from_rgb(234, 232, 226),
+    text: Color32::from_rgb(20, 20, 20),
+    text_muted: Color32::from_rgb(112, 110, 104),
+    text_faint: Color32::from_rgb(168, 165, 158),
+    rule: Color32::from_rgb(220, 217, 209),
+    accent: Color32::from_rgb(227, 0, 27),
+    accent_hover: Color32::from_rgb(186, 0, 22),
+    accent_text: Color32::from_rgb(227, 0, 27),
+    on_accent: Color32::WHITE,
+};
+
+pub static DARK: Palette = Palette {
+    background: Color32::from_rgb(22, 22, 21),
+    surface: Color32::from_rgb(38, 38, 36),
+    text: Color32::from_rgb(236, 234, 228),
+    text_muted: Color32::from_rgb(160, 157, 150),
+    text_faint: Color32::from_rgb(98, 96, 92),
+    rule: Color32::from_rgb(52, 51, 48),
+    accent: Color32::from_rgb(227, 0, 27),
+    accent_hover: Color32::from_rgb(186, 0, 22),
+    accent_text: Color32::from_rgb(255, 69, 80),
+    on_accent: Color32::WHITE,
+};
 
 const SEMIBOLD: &str = "semibold";
-const LIGHT: &str = "light";
+const LIGHT_WEIGHT: &str = "light";
+
+/// Palette of the theme being shown, which follows Windows when the choice is "System".
+pub fn palette(ctx: &egui::Context) -> &'static Palette {
+    match ctx.theme() {
+        Theme::Dark => &DARK,
+        Theme::Light => &LIGHT,
+    }
+}
 
 fn load_font(file: &str) -> Option<Arc<FontData>> {
     std::fs::read(format!(r"C:\Windows\Fonts\{file}")).ok().map(|b| Arc::new(FontData::from_owned(b)))
 }
 
-/// Loads Segoe UI from Windows and applies the flat, square-cornered style.
-pub fn apply(ctx: &egui::Context) {
+fn style_for(style: &mut egui::Style, theme: Theme, p: &Palette) {
+    style.visuals = match theme {
+        Theme::Dark => egui::Visuals::dark(),
+        Theme::Light => egui::Visuals::light(),
+    };
+    style.visuals.panel_fill = p.background;
+    style.visuals.window_fill = p.background;
+    style.visuals.extreme_bg_color = p.background;
+    style.visuals.override_text_color = Some(p.text);
+    style.visuals.selection.bg_fill = p.accent;
+    style.visuals.selection.stroke = stroke(1.0, p.on_accent);
+    for w in [&mut style.visuals.widgets.noninteractive, &mut style.visuals.widgets.inactive, &mut style.visuals.widgets.hovered, &mut style.visuals.widgets.active] {
+        w.corner_radius = CornerRadius::ZERO;
+        w.bg_stroke = Stroke::NONE;
+    }
+    style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+    style.spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
+    style.visuals.widgets.inactive.bg_fill = p.rule;
+    style.visuals.widgets.hovered.bg_fill = p.text_faint;
+    style.visuals.widgets.active.bg_fill = p.text_muted;
+}
+
+/// Loads Segoe UI from Windows, applies the flat, square-cornered style to both themes and selects one.
+pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
     let mut fonts = FontDefinitions::empty();
-    for (name, file) in [("regular", "segoeui.ttf"), (SEMIBOLD, "seguisb.ttf"), (LIGHT, "segoeuil.ttf"), ("mono", "consola.ttf"), ("fallback", "arial.ttf")] {
+    for (name, file) in [("regular", "segoeui.ttf"), (SEMIBOLD, "seguisb.ttf"), (LIGHT_WEIGHT, "segoeuil.ttf"), ("mono", "consola.ttf"), ("fallback", "arial.ttf")] {
         if let Some(data) = load_font(file) {
             fonts.font_data.insert(name.into(), data);
         }
@@ -38,25 +99,19 @@ pub fn apply(ctx: &egui::Context) {
     fonts.families.insert(FontFamily::Proportional, family("regular"));
     fonts.families.insert(FontFamily::Monospace, family("mono"));
     fonts.families.insert(FontFamily::Name(SEMIBOLD.into()), family(SEMIBOLD));
-    fonts.families.insert(FontFamily::Name(LIGHT.into()), family(LIGHT));
+    fonts.families.insert(FontFamily::Name(LIGHT_WEIGHT.into()), family(LIGHT_WEIGHT));
     ctx.set_fonts(fonts);
 
-    ctx.style_mut(|style| {
-        style.visuals = egui::Visuals::light();
-        style.visuals.panel_fill = BACKGROUND;
-        style.visuals.window_fill = BACKGROUND;
-        style.visuals.extreme_bg_color = BACKGROUND;
-        style.visuals.override_text_color = Some(TEXT);
-        style.visuals.selection.bg_fill = RED;
-        for w in [&mut style.visuals.widgets.noninteractive, &mut style.visuals.widgets.inactive, &mut style.visuals.widgets.hovered, &mut style.visuals.widgets.active] {
-            w.corner_radius = CornerRadius::ZERO;
-            w.bg_stroke = Stroke::NONE;
-        }
-        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
-        style.spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
-        style.visuals.widgets.inactive.bg_fill = RULE;
-        style.visuals.widgets.hovered.bg_fill = TEXT_FAINT;
-        style.visuals.widgets.active.bg_fill = TEXT_MUTED;
+    ctx.style_mut_of(Theme::Light, |style| style_for(style, Theme::Light, &LIGHT));
+    ctx.style_mut_of(Theme::Dark, |style| style_for(style, Theme::Dark, &DARK));
+    set_theme(ctx, choice);
+}
+
+pub fn set_theme(ctx: &egui::Context, choice: ThemeChoice) {
+    ctx.set_theme(match choice {
+        ThemeChoice::System => ThemePreference::System,
+        ThemeChoice::Light => ThemePreference::Light,
+        ThemeChoice::Dark => ThemePreference::Dark,
     });
 }
 
@@ -73,7 +128,7 @@ pub fn semibold(size: f32) -> FontId {
 }
 
 pub fn light(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(LIGHT.into()))
+    FontId::new(size, FontFamily::Name(LIGHT_WEIGHT.into()))
 }
 
 pub fn text(content: impl Into<String>, font: FontId, color: Color32) -> RichText {
@@ -81,33 +136,37 @@ pub fn text(content: impl Into<String>, font: FontId, color: Color32) -> RichTex
 }
 
 pub fn heading(ui: &mut Ui, title: &str, subtitle: &str) {
-    ui.label(text(title, semibold(40.0), TEXT));
+    let p = palette(ui.ctx());
+    ui.label(text(title, semibold(40.0), p.text));
     ui.add_space(2.0);
-    ui.label(text(subtitle, regular(15.0), TEXT_MUTED));
+    ui.label(text(subtitle, regular(15.0), p.text_muted));
     ui.add_space(28.0);
 }
 
 pub fn section_label(ui: &mut Ui, label: &str) {
-    ui.label(text(label.to_uppercase(), semibold(11.0), TEXT_MUTED).extra_letter_spacing(1.4));
+    let p = palette(ui.ctx());
+    ui.label(text(label.to_uppercase(), semibold(11.0), p.text_muted).extra_letter_spacing(1.4));
     ui.add_space(6.0);
 }
 
 /// Full-width 1 px horizontal rule.
 pub fn rule(ui: &mut Ui) {
+    let p = palette(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::ZERO, RULE);
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, p.rule);
 }
 
 fn button(ui: &mut Ui, label: &str, width: f32, enabled: bool, primary: bool) -> Response {
+    let p = palette(ui.ctx());
     let sense = if enabled { Sense::CLICK } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 46.0), sense);
     let hovered = enabled && response.hovered();
     let (fill, outline, text_color) = match (primary, enabled, hovered) {
-        (_, false, _) => (SURFACE, Stroke::NONE, TEXT_FAINT),
-        (true, true, false) => (RED, Stroke::NONE, WHITE),
-        (true, true, true) => (RED_DARK, Stroke::NONE, WHITE),
-        (false, true, false) => (Color32::TRANSPARENT, stroke(1.5, TEXT), TEXT),
-        (false, true, true) => (SURFACE, stroke(1.5, TEXT), TEXT),
+        (_, false, _) => (p.surface, Stroke::NONE, p.text_faint),
+        (true, true, false) => (p.accent, Stroke::NONE, p.on_accent),
+        (true, true, true) => (p.accent_hover, Stroke::NONE, p.on_accent),
+        (false, true, false) => (Color32::TRANSPARENT, stroke(1.5, p.text), p.text),
+        (false, true, true) => (p.surface, stroke(1.5, p.text), p.text),
     };
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::ZERO, fill);
@@ -136,10 +195,11 @@ pub fn link(ui: &mut Ui, label: &str, color: Color32) -> Response {
 }
 
 fn draw_box(ui: &Ui, rect: Rect, checked: bool, enabled: bool, radio: bool) {
+    let p = palette(ui.ctx());
     let square = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
     let painter = ui.painter();
-    let border = if enabled { TEXT } else { TEXT_FAINT };
-    let fill = if enabled { RED } else { TEXT_FAINT };
+    let border = if enabled { p.text } else { p.text_faint };
+    let fill = if enabled { p.accent } else { p.text_faint };
     match (checked, radio) {
         (false, _) => {
             painter.rect_stroke(square, CornerRadius::ZERO, stroke(1.5, border), StrokeKind::Inside);
@@ -149,7 +209,7 @@ fn draw_box(ui: &Ui, rect: Rect, checked: bool, enabled: bool, radio: bool) {
             let c = square.center();
             painter.add(Shape::line(
                 vec![Pos2::new(c.x - 4.5, c.y + 0.5), Pos2::new(c.x - 1.2, c.y + 3.8), Pos2::new(c.x + 4.8, c.y - 3.6)],
-                stroke(2.0, WHITE),
+                stroke(2.0, p.on_accent),
             ));
         }
         (true, true) => {
@@ -160,13 +220,14 @@ fn draw_box(ui: &Ui, rect: Rect, checked: bool, enabled: bool, radio: bool) {
 }
 
 fn choice(ui: &mut Ui, checked: bool, label: &str, enabled: bool, radio: bool) -> Response {
+    let p = palette(ui.ctx());
     let font = regular(14.5);
-    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), TEXT);
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), p.text);
     let width = 18.0 + 12.0 + galley.size().x;
     let sense = if enabled { Sense::CLICK } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), sense);
     draw_box(ui, Rect::from_min_size(rect.min, Vec2::new(18.0, rect.height())), checked, enabled, radio);
-    let color = if enabled { TEXT } else { TEXT_FAINT };
+    let color = if enabled { p.text } else { p.text_faint };
     ui.painter().text(Pos2::new(rect.left() + 30.0, rect.center().y), Align2::LEFT_CENTER, label, font, color);
     if enabled { response.on_hover_cursor(CursorIcon::PointingHand) } else { response }
 }
@@ -206,11 +267,11 @@ pub fn tag(ui: &mut Ui, label: &str, color: Color32) {
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, label.to_uppercase(), font, color);
 }
 
-pub fn status_color(status: Status) -> Color32 {
+pub fn status_color(p: &Palette, status: Status) -> Color32 {
     match status {
-        Status::Ok => TEXT,
-        Status::Warning => RED,
-        Status::Neutral => TEXT_MUTED,
+        Status::Ok => p.text,
+        Status::Warning => p.accent_text,
+        Status::Neutral => p.text_muted,
     }
 }
 
@@ -224,13 +285,14 @@ pub fn column(ui: &mut Ui, width: f32, content: RichText) {
 
 /// "Label — value" row, with the hint right below the value when there is one.
 pub fn item_row(ui: &mut Ui, item: &Item, label_width: f32) {
+    let p = palette(ui.ctx());
     ui.add_space(9.0);
     ui.horizontal_top(|ui| {
-        column(ui, label_width, text(&item.label, regular(14.0), TEXT_MUTED));
+        column(ui, label_width, text(&item.label, regular(14.0), p.text_muted));
         ui.vertical(|ui| {
-            ui.add(egui::Label::new(text(&item.value, semibold(14.0), status_color(item.status))).wrap());
+            ui.add(egui::Label::new(text(&item.value, semibold(14.0), status_color(p, item.status))).wrap());
             if let Some(hint) = &item.hint {
-                ui.add(egui::Label::new(text(format!("→ {hint}"), regular(12.5), TEXT_MUTED)).wrap());
+                ui.add(egui::Label::new(text(format!("→ {hint}"), regular(12.5), p.text_muted)).wrap());
             }
         });
     });
@@ -239,9 +301,10 @@ pub fn item_row(ui: &mut Ui, item: &Item, label_width: f32) {
 }
 
 pub fn loading(ui: &mut Ui, message: &str) {
+    let p = palette(ui.ctx());
     ui.horizontal(|ui| {
-        ui.add(egui::Spinner::new().size(16.0).color(TEXT));
-        ui.label(text(message, regular(14.0), TEXT_MUTED));
+        ui.add(egui::Spinner::new().size(16.0).color(p.text));
+        ui.label(text(message, regular(14.0), p.text_muted));
     });
 }
 

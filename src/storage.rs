@@ -33,6 +33,14 @@ pub struct ChosenGame {
     pub name: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ThemeChoice {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -41,6 +49,7 @@ pub struct Config {
     pub shutdown_wsl: bool,
     pub best_performance: bool,
     pub reopen_on_exit: bool,
+    pub theme: ThemeChoice,
 }
 
 impl Default for Config {
@@ -62,6 +71,7 @@ impl Default for Config {
             shutdown_wsl: true,
             best_performance: true,
             reopen_on_exit: true,
+            theme: ThemeChoice::System,
         }
     }
 }
