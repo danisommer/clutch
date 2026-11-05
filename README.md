@@ -46,6 +46,7 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
 - **Caution group**: categories that can cost you something are tagged and never preselected, not even after you cleaned them once. Examples are the Recycle Bin, AMD and DirectX shader caches, folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
 - **Elevation only when needed**: administrator rights are requested only for system items. That means one optional prompt to measure them and one prompt to clean them, and only when a selected category has any.
 - **Running programs block their category**: if Chrome is open, its cache is skipped and you can close it from the app.
+- **Report**: the results of a cleanup can be exported to a text file.
 
 ### History
 
@@ -221,7 +222,7 @@ Ideas:
 - [x] Per-game profiles (which programs to close, power settings)
 - [x] Game launch from other launchers: Epic Games and GOG found automatically, any other game through its executable
 - [ ] Automatic detection of EA app, Battle.net and Xbox app games
-- [ ] Exportable cleanup report
+- [x] Exportable cleanup report
 - [x] Executable icon and version info embedded as Windows resources
 - [x] CI with tests on every release
 - [ ] Signed builds

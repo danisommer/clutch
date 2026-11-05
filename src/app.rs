@@ -1,6 +1,7 @@
 //! Main window: navigation, Game Mode, Cleanup, History and Settings pages.
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -73,6 +74,7 @@ enum Message {
     SystemMeasured(Result<HashMap<String, u64>, String>),
     Cleaned { results: Vec<CleanupResult>, warning: Option<String> },
     BlockersClosed(Vec<Item>),
+    ReportSaved(Result<PathBuf, String>),
 }
 
 enum GameAction {
@@ -93,6 +95,7 @@ enum CleanupAction {
     MeasureSystem,
     Clean,
     CloseBlockers(String),
+    ExportReport,
 }
 
 pub struct App {
@@ -124,6 +127,7 @@ pub struct App {
     history: Vec<HistoryEntry>,
     custom_rules: cleanup::CustomRules,
     settings_warning: Option<String>,
+    report_status: Option<Result<PathBuf, String>>,
     _window_marker: Option<watcher::Marker>,
     close_at: Option<Instant>,
 }
@@ -163,6 +167,7 @@ impl App {
             history: storage::load_history(),
             custom_rules: cleanup::CustomRules::default(),
             settings_warning: None,
+            report_status: None,
             _window_marker: watcher::mark_window(),
             close_at: None,
         };
@@ -465,7 +470,9 @@ impl App {
                     self.cleanup_warning = Some(error);
                     self.cleanup_phase = CleanupPhase::Analyzed;
                 }
+                Message::ReportSaved(status) => self.report_status = Some(status),
                 Message::Cleaned { results, warning } => {
+                    self.report_status = None;
                     self.results = results;
                     self.cleanup_warning = warning;
                     self.cleanup_phase = CleanupPhase::Done;
@@ -852,6 +859,7 @@ impl App {
             Some(CleanupAction::MeasureSystem) => self.measure_system(ctx),
             Some(CleanupAction::Clean) => self.clean(ctx),
             Some(CleanupAction::CloseBlockers(id)) => self.close_blockers(ctx, &id),
+            Some(CleanupAction::ExportReport) => self.export_report(ctx),
             None => {}
         }
     }
@@ -953,7 +961,48 @@ impl App {
             }
         });
         ui.add_space(20.0);
-        secondary_button(ui, t.analyze_again, 220.0).clicked().then_some(CleanupAction::Analyze)
+        let mut action = None;
+        ui.horizontal(|ui| {
+            if secondary_button(ui, t.analyze_again, 220.0).clicked() {
+                action = Some(CleanupAction::Analyze);
+            }
+            ui.add_space(20.0);
+            ui.vertical(|ui| {
+                ui.add_space(14.0);
+                match &self.report_status {
+                    None => {
+                        if link(ui, t.export_report, pal.accent_text).clicked() {
+                            action = Some(CleanupAction::ExportReport);
+                        }
+                    }
+                    Some(Ok(path)) => {
+                        ui.horizontal(|ui| {
+                            ui.label(text(t.report_saved(&path.display().to_string()), regular(13.0), pal.text_muted));
+                            if link(ui, t.open_file, pal.accent_text).clicked() {
+                                system::shell_open(&path.to_string_lossy());
+                            }
+                        });
+                    }
+                    Some(Err(error)) => {
+                        ui.label(text(t.could_not_save(error), semibold(13.0), pal.accent_text));
+                    }
+                }
+            });
+        });
+        action
+    }
+
+    /// Writes the results of the last cleanup to a text file the user chooses, without blocking the window.
+    fn export_report(&mut self, ctx: &egui::Context) {
+        let t = self.t;
+        let report = cleanup_report(t, &self.catalog, &self.results, self.cleanup_warning.as_deref());
+        let file_name = t.report_file_name(&storage::now_local());
+        self.spawn_task(ctx, move |tx, _| {
+            if let Some(path) = system::choose_save_path(t.save_report_title, t.text_filter, "*.txt", &file_name, "txt") {
+                let saved = fs::write(&path, format!("\u{feff}{report}")).map(|()| path).map_err(|e| e.to_string());
+                let _ = tx.send(Message::ReportSaved(saved));
+            }
+        });
     }
 
     fn history_page(&mut self, ui: &mut Ui) {
@@ -1227,6 +1276,33 @@ fn result_item(t: &Texts, name: String, result: &CleanupResult) -> Item {
     };
     let status = if result.error.is_some() { Status::Warning } else { Status::Ok };
     Item::new(name, value, status, hint)
+}
+
+/// Plain-text report of a cleanup, with Windows line endings so any Notepad shows it well.
+fn cleanup_report(t: &Texts, catalog: &Catalog, results: &[CleanupResult], warning: Option<&str>) -> String {
+    let freed: u64 = results.iter().map(|r| r.tally.bytes).sum();
+    let recycled: u64 = results.iter().map(|r| r.tally.recycled).sum();
+    let mut lines = vec![
+        format!("{BRAND_FIRST_LINE} {BRAND_SECOND_LINE} {}", env!("CARGO_PKG_VERSION")),
+        format!("{}: {}", t.report_title, t.date(&storage::now_local())),
+        String::new(),
+        format!("{}: {}", t.freed, t.size(freed)),
+    ];
+    if recycled > 0 {
+        lines.push(t.in_recycle_bin(&t.size(recycled)));
+    }
+    lines.extend(warning.map(str::to_string));
+    lines.push(String::new());
+    for result in results {
+        let name = catalog.categories.iter().find(|c| c.id == result.id).map(|c| c.name.get(t.language).to_string()).unwrap_or_else(|| result.id.clone());
+        let item = result_item(t, name, result);
+        lines.push(match item.hint {
+            Some(hint) => format!("- {}: {} ({hint})", item.label, item.value),
+            None => format!("- {}: {}", item.label, item.value),
+        });
+    }
+    lines.push(String::new());
+    lines.join("\r\n")
 }
 
 fn shorten(value: &str, max: usize) -> String {

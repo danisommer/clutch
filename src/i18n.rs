@@ -200,6 +200,11 @@ pub struct Texts {
     pub add_game_exe: &'static str,
     pub pick_game_title: &'static str,
     pub programs_filter: &'static str,
+    pub export_report: &'static str,
+    pub report_title: &'static str,
+    pub save_report_title: &'static str,
+    pub text_filter: &'static str,
+    pub open_file: &'static str,
 }
 
 impl Texts {
@@ -342,6 +347,28 @@ impl Texts {
             (Language::En, Group::Leftovers) => "Leftovers",
             (Language::En, Group::Custom) => "Your rules",
             (Language::En, Group::Caution) => "Caution",
+        }
+    }
+
+    pub fn report_file_name(&self, stamp: &Stamp) -> String {
+        let Stamp { year, month, day, hour, minute } = *stamp;
+        match self.language {
+            Language::PtBr => format!("relatorio-limpeza-{year}-{month:02}-{day:02}-{hour:02}{minute:02}.txt"),
+            Language::En => format!("cleanup-report-{year}-{month:02}-{day:02}-{hour:02}{minute:02}.txt"),
+        }
+    }
+
+    pub fn report_saved(&self, path: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Relatório salvo em {path}."),
+            Language::En => format!("Report saved to {path}."),
+        }
+    }
+
+    pub fn could_not_save(&self, error: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Não foi possível salvar o relatório: {error}"),
+            Language::En => format!("Could not save the report: {error}"),
         }
     }
 
@@ -673,6 +700,11 @@ pub static PT_BR: Texts = Texts {
     add_game_exe: "+ Adicionar jogo pelo executável",
     pick_game_title: "Escolha o executável do jogo",
     programs_filter: "Programas",
+    export_report: "Exportar relatório",
+    report_title: "Relatório de limpeza",
+    save_report_title: "Salvar relatório",
+    text_filter: "Texto",
+    open_file: "Abrir",
 };
 
 pub static EN: Texts = Texts {
@@ -803,6 +835,11 @@ pub static EN: Texts = Texts {
     add_game_exe: "+ Add a game by its executable",
     pick_game_title: "Choose the game executable",
     programs_filter: "Programs",
+    export_report: "Export report",
+    report_title: "Cleanup report",
+    save_report_title: "Save report",
+    text_filter: "Text",
+    open_file: "Open",
 };
 
 #[cfg(test)]
