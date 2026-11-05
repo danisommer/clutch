@@ -52,6 +52,10 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
 
 A list of the cleanups done, with space freed, and of past Game Mode sessions.
 
+### Accessibility
+
+Every button, link, checkbox and option can be reached with **Tab** and activated with **Space** or **Enter**, with a visible focus outline. Screen readers such as Narrator and NVDA get each control's role, label and state through AccessKit.
+
 ### Settings
 
 - **Theme**: light, dark, or following the Windows setting (the default).
@@ -228,7 +232,7 @@ Ideas:
 - [ ] Signed builds
 - [x] Distribution through Scoop (manifest in each release)
 - [ ] Distribution through winget
-- [ ] Keyboard navigation and screen reader support
+- [x] Keyboard navigation and screen reader support
 
 ## License
 

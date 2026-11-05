@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Align, Align2, CornerRadius, CursorIcon, Frame, Id, Layout, Margin, Pos2, Rect, Response,
-    Sense, StrokeKind, Ui, Vec2, ViewportCommand,
+    Sense, StrokeKind, Ui, Vec2, ViewportCommand, WidgetInfo, WidgetType,
 };
 
 use crate::admin;
@@ -497,8 +497,13 @@ impl App {
         let size = Vec2::new(46.0, rect.height());
         let close = Rect::from_min_size(Pos2::new(rect.right() - size.x, rect.top()), size);
         let minimize = Rect::from_min_size(Pos2::new(close.left() - size.x, rect.top()), size);
-        let minimize_response = ui.interact(minimize, Id::new("minimize"), Sense::CLICK).on_hover_cursor(CursorIcon::PointingHand);
-        let close_response = ui.interact(close, Id::new("close"), Sense::CLICK).on_hover_cursor(CursorIcon::PointingHand);
+        let t = self.t;
+        let minimize_response = ui.interact(minimize, Id::new("minimize"), Sense::click()).on_hover_cursor(CursorIcon::PointingHand);
+        let close_response = ui.interact(close, Id::new("close"), Sense::click()).on_hover_cursor(CursorIcon::PointingHand);
+        minimize_response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, t.minimize));
+        close_response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, t.close_window));
+        focus_ring(ui, &minimize_response);
+        focus_ring(ui, &close_response);
         let painter = ui.painter();
         if minimize_response.hovered() {
             painter.rect_filled(minimize, CornerRadius::ZERO, pal.surface);
@@ -1192,7 +1197,9 @@ impl eframe::App for App {
 
 fn nav_item(ui: &mut Ui, number: u32, name: &str, active: bool) -> Response {
     let pal = palette(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::CLICK);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::click());
+    response.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, active, name));
+    focus_ring(ui, &response);
     let hovered = response.hovered();
     let painter = ui.painter();
     let number_color = if active { pal.accent_text } else { pal.text_faint };
@@ -1213,7 +1220,7 @@ fn category_row(ui: &mut Ui, t: &Texts, category: &Category, analysis: &Analysis
     ui.add_space(12.0);
     ui.horizontal_top(|ui| {
         let mut checked = selection.contains(&category.id);
-        if bare_checkbox(ui, &mut checked, !blocked).changed() {
+        if bare_checkbox(ui, &mut checked, category.name.get(t.language), !blocked).changed() {
             match checked {
                 true => selection.insert(category.id.clone()),
                 false => selection.remove(&category.id),

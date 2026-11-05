@@ -5,6 +5,7 @@ use std::sync::Arc;
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, CursorIcon, FontData, FontDefinitions, FontFamily, FontId,
     Pos2, Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Theme, ThemePreference, Ui, Vec2,
+    WidgetInfo, WidgetType,
 };
 
 use crate::game_mode::{Item, Status};
@@ -119,6 +120,22 @@ pub fn stroke(width: f32, color: Color32) -> Stroke {
     Stroke { width, color }
 }
 
+/// Click sense for enabled widgets, which also lets them take keyboard focus.
+fn click_sense(enabled: bool) -> Sense {
+    match enabled {
+        true => Sense::click(),
+        false => Sense::hover(),
+    }
+}
+
+/// Outline around the widget that has keyboard focus.
+pub fn focus_ring(ui: &Ui, response: &Response) {
+    if response.has_focus() {
+        let p = palette(ui.ctx());
+        ui.painter().rect_stroke(response.rect.expand(3.0), CornerRadius::ZERO, stroke(2.0, p.accent_text), StrokeKind::Outside);
+    }
+}
+
 pub fn regular(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
 }
@@ -158,8 +175,9 @@ pub fn rule(ui: &mut Ui) {
 
 fn button(ui: &mut Ui, label: &str, width: f32, enabled: bool, primary: bool) -> Response {
     let p = palette(ui.ctx());
-    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 46.0), sense);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 46.0), click_sense(enabled));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    focus_ring(ui, &response);
     let hovered = enabled && response.hovered();
     let (fill, outline, text_color) = match (primary, enabled, hovered) {
         (_, false, _) => (p.surface, Stroke::NONE, p.text_faint),
@@ -186,7 +204,9 @@ pub fn secondary_button(ui: &mut Ui, label: &str, width: f32) -> Response {
 }
 
 pub fn link(ui: &mut Ui, label: &str, color: Color32) -> Response {
-    let response = ui.add(egui::Label::new(text(label, semibold(13.0), color)).sense(Sense::CLICK));
+    let response = ui.add(egui::Label::new(text(label, semibold(13.0), color)).sense(Sense::click()));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Link, true, label));
+    focus_ring(ui, &response);
     if response.hovered() {
         let r = response.rect;
         ui.painter().line_segment([Pos2::new(r.left(), r.bottom()), Pos2::new(r.right(), r.bottom())], stroke(1.0, color));
@@ -224,8 +244,10 @@ fn choice(ui: &mut Ui, checked: bool, label: &str, enabled: bool, radio: bool) -
     let font = regular(14.5);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), p.text);
     let width = 18.0 + 12.0 + galley.size().x;
-    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), sense);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.0), click_sense(enabled));
+    let kind = if radio { WidgetType::RadioButton } else { WidgetType::Checkbox };
+    response.widget_info(|| WidgetInfo::selected(kind, enabled, checked, label));
+    focus_ring(ui, &response);
     draw_box(ui, Rect::from_min_size(rect.min, Vec2::new(18.0, rect.height())), checked, enabled, radio);
     let color = if enabled { p.text } else { p.text_faint };
     ui.painter().text(Pos2::new(rect.left() + 30.0, rect.center().y), Align2::LEFT_CENTER, label, font, color);
@@ -246,10 +268,11 @@ pub fn radio(ui: &mut Ui, selected: bool, label: &str) -> Response {
     choice(ui, selected, label, true, true)
 }
 
-/// Checkbox square without a label, for rows with their own layout.
-pub fn bare_checkbox(ui: &mut Ui, checked: &mut bool, enabled: bool) -> Response {
-    let sense = if enabled { Sense::CLICK } else { Sense::hover() };
-    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(18.0, 22.0), sense);
+/// Checkbox square drawn without its label, for rows with their own layout; `label` is what screen readers say.
+pub fn bare_checkbox(ui: &mut Ui, checked: &mut bool, label: &str, enabled: bool) -> Response {
+    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(18.0, 22.0), click_sense(enabled));
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, *checked, label));
+    focus_ring(ui, &response);
     draw_box(ui, rect, *checked, enabled, false);
     if response.clicked() {
         *checked = !*checked;
