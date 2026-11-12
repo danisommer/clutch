@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds Modo Jogo e Limpeza and installs the executable in %LOCALAPPDATA%\Programs\ModoJogoLimpeza.
+    Builds Clutch and installs the executable in %LOCALAPPDATA%\Programs\Clutch.
 .DESCRIPTION
     Uses the Rust GNU toolchain (x86_64-pc-windows-gnu), which needs dlltool.exe and as.exe from
     MinGW-w64 binutils. They are taken from -Binutils when that folder exists, otherwise from PATH.
@@ -10,7 +10,7 @@
 .PARAMETER Debug
     Builds without optimizations and does not install.
 .PARAMETER Shortcut
-    Also creates a "Modo Jogo e Limpeza" shortcut on the desktop.
+    Also creates a "Clutch" shortcut on the desktop.
 .PARAMETER Binutils
     Folder with dlltool.exe and as.exe. Defaults to %USERPROFILE%\.cargo\mingw-as.
 #>
@@ -39,16 +39,16 @@ if ($Debug) {
 cargo build --release --manifest-path $manifest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$destination = Join-Path $env:LOCALAPPDATA 'Programs\ModoJogoLimpeza'
-$exe = Join-Path $destination 'ModoJogoLimpeza.exe'
+$destination = Join-Path $env:LOCALAPPDATA 'Programs\Clutch'
+$exe = Join-Path $destination 'Clutch.exe'
 $icon = Join-Path $destination 'icon.ico'
 New-Item -ItemType Directory -Force $destination | Out-Null
-Copy-Item (Join-Path $PSScriptRoot 'target\release\modo-jogo-limpeza.exe') $exe -Force
+Copy-Item (Join-Path $PSScriptRoot 'target\release\clutch.exe') $exe -Force
 Copy-Item (Join-Path $PSScriptRoot 'assets\icon.ico') $icon -Force
 Write-Host "Installed in $destination"
 
 if ($Shortcut) {
-    $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Modo Jogo e Limpeza.lnk'
+    $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Clutch.lnk'
     $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
     $lnk.TargetPath = $exe
     $lnk.WorkingDirectory = $destination

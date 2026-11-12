@@ -50,12 +50,12 @@ jobs:
 
       - name: Build
         env:
-          MJL_REQUIRE_RESOURCES: "1"
+          CLUTCH_REQUIRE_RESOURCES: "1"
         run: cargo build --release --locked
 
       - name: Check that the executable only needs Windows DLLs
         run: |
-          $dlls = objdump -p target\release\modo-jogo-limpeza.exe | Select-String 'DLL Name: (.+)' | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() }
+          $dlls = objdump -p target\release\clutch.exe | Select-String 'DLL Name: (.+)' | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() }
           $foreign = $dlls | Where-Object { $_ -match '^(libgcc|libwinpthread|libstdc\+\+|vcruntime|msvcp)' }
           if ($foreign) { throw "Unexpected DLL dependencies: $($foreign -join ', ')" }
           $dlls
@@ -65,23 +65,23 @@ jobs:
           $tag = '${{ github.ref_name }}'
           $repository = '${{ github.repository }}'
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target\release\modo-jogo-limpeza.exe dist\ModoJogoLimpeza.exe
-          $hash = (Get-FileHash dist\ModoJogoLimpeza.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  ModoJogoLimpeza.exe" | Out-File dist\ModoJogoLimpeza.exe.sha256 -Encoding ascii -NoNewline
+          Copy-Item target\release\clutch.exe dist\Clutch.exe
+          $hash = (Get-FileHash dist\Clutch.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  Clutch.exe" | Out-File dist\Clutch.exe.sha256 -Encoding ascii -NoNewline
           [ordered]@{
             version     = $tag.TrimStart('v')
             description = 'Game Mode and safe storage cleanup for Windows'
             homepage    = "https://github.com/$repository"
             license     = 'Proprietary'
-            url         = "https://github.com/$repository/releases/download/$tag/ModoJogoLimpeza.exe"
+            url         = "https://github.com/$repository/releases/download/$tag/Clutch.exe"
             hash        = $hash
-            bin         = 'ModoJogoLimpeza.exe'
-            shortcuts   = @(, @('ModoJogoLimpeza.exe', 'Modo Jogo e Limpeza'))
-          } | ConvertTo-Json -Depth 4 | Out-File dist\modo-jogo-limpeza.json -Encoding utf8NoBOM
+            bin         = 'Clutch.exe'
+            shortcuts   = @(, @('Clutch.exe', 'Clutch'))
+          } | ConvertTo-Json -Depth 4 | Out-File dist\clutch.json -Encoding utf8NoBOM
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = '${{ github.ref_name }}'
-          gh release create $tag dist\ModoJogoLimpeza.exe dist\ModoJogoLimpeza.exe.sha256 dist\modo-jogo-limpeza.json --title $tag --generate-notes
+          gh release create $tag dist\Clutch.exe dist\Clutch.exe.sha256 dist\clutch.json --title $tag --generate-notes

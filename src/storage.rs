@@ -1,4 +1,4 @@
-//! Settings, history and the Game Mode session, stored as JSON in %LOCALAPPDATA%\ModoJogoLimpeza.
+//! Settings, history and the Game Mode session, stored as JSON in %LOCALAPPDATA%\Clutch.
 
 use std::collections::HashMap;
 use std::fs;
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::system;
 
 const HISTORY_LIMIT: usize = 100;
+const LEGACY_DIR: &str = "ModoJogoLimpeza";
 
 /// When a program may be terminated if it does not close on request.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -259,11 +260,29 @@ pub struct Session {
     pub game_folder: Option<String>,
 }
 
-pub fn data_dir() -> PathBuf {
+/// The data folder and the one used before the app was renamed.
+fn data_dirs() -> (PathBuf, PathBuf) {
     let base = std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
-    let dir = base.join("ModoJogoLimpeza");
+    (base.join(crate::APP_NAME), base.join(LEGACY_DIR))
+}
+
+/// The folder with the app's data. The one from before the rename stays in use until `migrate_legacy_data` moves it.
+pub fn data_dir() -> PathBuf {
+    let (current, legacy) = data_dirs();
+    let dir = match (current.is_dir(), legacy.is_dir()) {
+        (false, true) => legacy,
+        _ => current,
+    };
     let _ = fs::create_dir_all(&dir);
     dir
+}
+
+/// Moves the data folder from before the rename to its new name. When it cannot be moved, it stays in use and the next start tries again.
+pub fn migrate_legacy_data() {
+    let (current, legacy) = data_dirs();
+    if legacy.is_dir() && !current.exists() {
+        let _ = fs::rename(&legacy, &current);
+    }
 }
 
 fn strip_bom(text: &str) -> &str {

@@ -411,7 +411,7 @@ pub fn game_running(folder: &Path) -> bool {
 pub fn programs_to_add(config: &Config) -> Vec<(String, String)> {
     let ignore = [
         "explorer", "ApplicationFrameHost", "SystemSettings", "TextInputHost", "ShellExperienceHost",
-        "SearchHost", "StartMenuExperienceHost", "LockApp", "modo-jogo-limpeza", "ModoJogoLimpeza",
+        "SearchHost", "StartMenuExperienceHost", "LockApp", crate::APP_NAME,
     ];
     let all = system::processes();
     let exclude = system::self_and_ancestors(&all);

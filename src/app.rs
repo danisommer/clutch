@@ -25,14 +25,12 @@ use crate::storage::{
     ThemeChoice,
 };
 use crate::theme::{self, *};
-use crate::{system, watcher};
+use crate::{APP_NAME, system, watcher};
 
 const NAV_WIDTH: f32 = 252.0;
 const TITLE_BAR_HEIGHT: f32 = 40.0;
 const AUTO_CLOSE_DELAY: Duration = Duration::from_secs(10);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
-const BRAND_FIRST_LINE: &str = "Modo Jogo";
-const BRAND_SECOND_LINE: &str = "e Limpeza";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -577,8 +575,11 @@ impl App {
         let pal = palette(ui.ctx());
         let t = self.t;
         ui.add_space(14.0);
-        ui.label(text(BRAND_FIRST_LINE, semibold(24.0), pal.text));
-        ui.label(text(BRAND_SECOND_LINE, semibold(24.0), pal.text_faint));
+        ui.horizontal(|ui| {
+            mark(ui, 28.0);
+            ui.add_space(4.0);
+            ui.label(text(APP_NAME, semibold(24.0), pal.text));
+        });
         ui.add_space(16.0);
         let (bar, _) = ui.allocate_exact_size(Vec2::new(28.0, 4.0), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, pal.accent);
@@ -1589,7 +1590,7 @@ fn cleanup_report(t: &Texts, catalog: &Catalog, results: &[CleanupResult], warni
     let freed: u64 = results.iter().map(|r| r.tally.bytes).sum();
     let recycled: u64 = results.iter().map(|r| r.tally.recycled).sum();
     let mut lines = vec![
-        format!("{BRAND_FIRST_LINE} {BRAND_SECOND_LINE} {}", env!("CARGO_PKG_VERSION")),
+        format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION")),
         format!("{}: {}", t.report_title, t.date(&storage::now_local())),
         String::new(),
         format!("{}: {}", t.freed, t.size(freed)),

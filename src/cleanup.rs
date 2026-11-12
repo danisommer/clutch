@@ -467,7 +467,7 @@ impl Rules {
         if let Some(local) = env_path("LOCALAPPDATA") {
             protected.push(local.join("wsl"));
             protected.push(local.join("Packages"));
-            protected.push(local.join(r"Programs\ModoJogoLimpeza"));
+            protected.push(local.join("Programs").join(crate::APP_NAME));
         }
         protected.push(storage::data_dir());
         if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
@@ -911,7 +911,7 @@ mod tests {
     }
 
     fn test_folder(name: &str) -> PathBuf {
-        let base = std::env::temp_dir().join(format!("mjl-test-{name}-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("clutch-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         base

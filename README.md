@@ -1,20 +1,22 @@
-# Modo Jogo e Limpeza
+# Clutch
 
 **Game Mode and safe storage cleanup for Windows, in a single ~2 MB native app.**
 
-*Modo Jogo e Limpeza* is Portuguese for "Game Mode & Cleanup". It prepares the computer for a gaming session and puts it back the way it was afterwards. It can also find and remove temporary files, caches and leftovers, deleting nothing until you confirm.
+Clutch prepares the computer for a gaming session and puts it back the way it was afterwards. It can also find and remove temporary files, caches and leftovers, deleting nothing until you confirm.
+
+The app used to be called *Modo Jogo e Limpeza*. Its settings and history move to the new folder the first time Clutch runs.
 
 The interface is available in Brazilian Portuguese and English. By default it follows the Windows display language: Portuguese when Windows is in Portuguese, English otherwise.
 
 ## Download
 
-Prebuilt executables are on the [Releases](https://github.com/danisommer/modo-jogo-limpeza/releases) page. The app is a single portable `ModoJogoLimpeza.exe`: download it, put it in any folder and run it. Each release also has:
+Prebuilt executables are on the [Releases](https://github.com/danisommer/modo-jogo-limpeza/releases) page. The app is a single portable `Clutch.exe`: download it, put it in any folder and run it. Each release also has:
 
 - a `.sha256` file to check the download;
 - a [Scoop](https://scoop.sh) manifest, which installs the app and adds a Start menu shortcut:
 
   ```powershell
-  scoop install https://github.com/danisommer/modo-jogo-limpeza/releases/latest/download/modo-jogo-limpeza.json
+  scoop install https://github.com/danisommer/modo-jogo-limpeza/releases/latest/download/clutch.json
   ```
 
 The executable is not signed yet, so Windows SmartScreen may warn on the first run. Choose **More info**, then **Run anyway**.
@@ -108,7 +110,7 @@ The project is developed with the GNU toolchain (`x86_64-pc-windows-gnu`). It ne
 
 ```powershell
 rustup default stable-x86_64-pc-windows-gnu
-.\build.ps1             # release build, installed in %LOCALAPPDATA%\Programs\ModoJogoLimpeza
+.\build.ps1             # release build, installed in %LOCALAPPDATA%\Programs\Clutch
 .\build.ps1 -Shortcut   # same, plus a desktop shortcut
 .\build.ps1 -Debug      # debug build, not installed
 ```
@@ -135,9 +137,9 @@ cargo test print_ -- --ignored --nocapture      # read-only diagnostics of this 
 
 | What | Where |
 | --- | --- |
-| Program | `%LOCALAPPDATA%\Programs\ModoJogoLimpeza` |
-| Settings, history, current session | `%LOCALAPPDATA%\ModoJogoLimpeza\*.json` |
-| Custom cleanup rules | `%LOCALAPPDATA%\ModoJogoLimpeza\custom-categories.json` |
+| Program | `%LOCALAPPDATA%\Programs\Clutch` |
+| Settings, history, current session | `%LOCALAPPDATA%\Clutch\*.json` |
+| Custom cleanup rules | `%LOCALAPPDATA%\Clutch\custom-categories.json` |
 | Cleanup catalog | [`categories.json`](categories.json), embedded at build time |
 
 ### Catalog format
@@ -168,7 +170,7 @@ Targets with `"admin": true` run in the elevated helper. Targets with `notInstal
 
 ### Custom rules
 
-Your own categories go in `%LOCALAPPDATA%\ModoJogoLimpeza\custom-categories.json`, in the same format as the catalog. **Settings → Open the rules file** creates it with an example and opens it in Notepad. The rules show up in the Cleanup page under **Your rules** at the next analysis.
+Your own categories go in `%LOCALAPPDATA%\Clutch\custom-categories.json`, in the same format as the catalog. **Settings → Open the rules file** creates it with an example and opens it in Notepad. The rules show up in the Cleanup page under **Your rules** at the next analysis.
 
 ```json
 {

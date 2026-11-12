@@ -12,8 +12,8 @@ use windows_sys::Win32::System::Threading::{CreateMutexW, OpenMutexW};
 use crate::{game_mode, i18n, storage, system};
 
 pub const ARG: &str = "--watcher";
-const WATCHER_MUTEX: &str = r"Local\ModoJogoLimpeza.Watcher";
-const WINDOW_MUTEX: &str = r"Local\ModoJogoLimpeza.Window";
+const WATCHER_MUTEX: &str = r"Local\Clutch.Watcher";
+const WINDOW_MUTEX: &str = r"Local\Clutch.Window";
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
