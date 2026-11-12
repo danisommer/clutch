@@ -66,6 +66,44 @@ pub struct CustomGame {
     pub exe: String,
 }
 
+/// Eco Mode choices. `close` names the programs of the Game Mode list that Eco Mode closes.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct EcoConfig {
+    pub close: Vec<String>,
+    pub shutdown_wsl: bool,
+    pub power_efficiency: bool,
+    pub energy_saver: bool,
+    pub lower_refresh_rate: bool,
+    pub dim_screen: bool,
+    pub end_when_plugged_in: bool,
+    pub reopen_on_exit: bool,
+}
+
+impl Default for EcoConfig {
+    fn default() -> Self {
+        EcoConfig {
+            close: Vec::new(),
+            shutdown_wsl: true,
+            power_efficiency: true,
+            energy_saver: true,
+            lower_refresh_rate: true,
+            dim_screen: true,
+            end_when_plugged_in: true,
+            reopen_on_exit: true,
+        }
+    }
+}
+
+impl EcoConfig {
+    pub fn set_closes(&mut self, name: &str, closes: bool) {
+        self.close.retain(|n| n != name);
+        if closes {
+            self.close.push(name.to_string());
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ThemeChoice {
     #[default]
@@ -97,6 +135,7 @@ pub struct Config {
     pub custom_games: Vec<CustomGame>,
     pub profiles: Vec<GameProfile>,
     pub removed_apps: Vec<String>,
+    pub eco: EcoConfig,
 }
 
 impl Default for Config {
@@ -125,6 +164,7 @@ impl Default for Config {
             custom_games: Vec::new(),
             profiles: Vec::new(),
             removed_apps: Vec::new(),
+            eco: EcoConfig::default(),
         }
     }
 }
@@ -201,12 +241,21 @@ impl Config {
             self.profiles.remove(index);
         }
     }
+
+    /// Whether the programs a session closed are reopened when it ends.
+    pub fn reopens(&self, session: &Session) -> bool {
+        match session.eco {
+            Some(_) => self.eco.reopen_on_exit,
+            None => self.reopen_on_exit,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum HistoryKind {
     GameMode,
     Cleanup,
+    EcoMode,
 }
 
 /// Local date and time, kept as numbers so it can be shown in any language.
@@ -233,6 +282,7 @@ pub enum HistoryDate {
 pub enum Summary {
     Cleanup { categories: usize },
     GameMode { game: Option<String>, seconds: u64 },
+    EcoMode { eco_seconds: u64 },
     Legacy(String),
 }
 
@@ -251,6 +301,23 @@ pub struct ClosedProgram {
     pub aumid: Option<String>,
 }
 
+/// A screen, by its Windows display device name, and the refresh rate it had.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScreenRate {
+    pub device: String,
+    pub hz: u32,
+}
+
+/// What Eco Mode changed besides the power mode and the closed programs, with the values to put back.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EcoRestore {
+    pub refresh_rates: Vec<ScreenRate>,
+    pub brightness: Option<u8>,
+    pub saver_threshold: Option<u32>,
+    pub end_when_plugged_in: bool,
+}
+
+/// A Game Mode session, or an Eco Mode one when `eco` is set.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
     pub started_at: u64,
@@ -258,6 +325,8 @@ pub struct Session {
     pub closed_programs: Vec<ClosedProgram>,
     pub game: Option<ChosenGame>,
     pub game_folder: Option<String>,
+    #[serde(default)]
+    pub eco: Option<EcoRestore>,
 }
 
 /// The data folder and the one used before the app was renamed.
@@ -357,12 +426,19 @@ pub fn delete_session() {
     let _ = fs::remove_file(dir.join("session-closing.json"));
 }
 
-pub fn save_last_summary<T: Serialize>(items: &T) -> std::io::Result<()> {
-    write_json("last-summary.json", items)
+/// What the watcher leaves for the window when it ends a session: whether it was an Eco Mode one, and what was restored.
+#[derive(Serialize, Deserialize)]
+pub struct LastSummary<T> {
+    pub eco: bool,
+    pub items: T,
+}
+
+pub fn save_last_summary<T: Serialize>(summary: &LastSummary<T>) -> std::io::Result<()> {
+    write_json("last-summary.json", summary)
 }
 
 /// Reads and deletes the summary left by the watcher when it ended a session.
-pub fn take_last_summary<T: DeserializeOwned>() -> Option<T> {
+pub fn take_last_summary<T: DeserializeOwned>() -> Option<LastSummary<T>> {
     let summary = read_json("last-summary.json");
     let _ = fs::remove_file(data_dir().join("last-summary.json"));
     summary

@@ -222,6 +222,30 @@ pub struct Texts {
     pub save_report_title: &'static str,
     pub text_filter: &'static str,
     pub open_file: &'static str,
+
+    pub eco_mode: &'static str,
+    pub eco_mode_subtitle: &'static str,
+    pub activate_eco: &'static str,
+    pub deactivate_eco: &'static str,
+    pub eco_programs_hint: &'static str,
+    pub eco_power_efficiency: &'static str,
+    pub eco_energy_saver: &'static str,
+    pub eco_lower_refresh: &'static str,
+    pub eco_end_when_plugged: &'static str,
+    pub eco_reopen_on_exit: &'static str,
+    pub eco_on_battery: &'static str,
+    pub eco_waiting_unplug: &'static str,
+    pub eco_manual: &'static str,
+    pub energy_saver: &'static str,
+    pub saver_on: &'static str,
+    pub saver_only_on_battery: &'static str,
+    pub could_not_set_efficiency: &'static str,
+    pub brightness: &'static str,
+    pub brightness_hint: &'static str,
+    pub could_not_change: &'static str,
+    pub restored: &'static str,
+    pub lenovo_select_battery: &'static str,
+    pub step_screen: &'static str,
 }
 
 impl Texts {
@@ -246,10 +270,38 @@ impl Texts {
         }
     }
 
-    pub fn window_closes_in(&self, seconds: u64) -> String {
+    pub fn window_closes_in(&self, seconds: u64, mode: &str) -> String {
         match self.language {
-            Language::PtBr => format!("Esta janela fecha em {seconds} s para liberar memória. O Modo Jogo continua ativo."),
-            Language::En => format!("This window closes in {seconds} s to free memory. Game Mode stays on."),
+            Language::PtBr => format!("Esta janela fecha em {seconds} s para liberar memória. O {mode} continua ativo."),
+            Language::En => format!("This window closes in {seconds} s to free memory. {mode} stays on."),
+        }
+    }
+
+    pub fn other_mode_active(&self, mode: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("O {mode} está ativo. Encerre-o antes de usar este modo."),
+            Language::En => format!("{mode} is on. End it before using this mode."),
+        }
+    }
+
+    pub fn go_to(&self, page: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Ir para {page}"),
+            Language::En => format!("Go to {page}"),
+        }
+    }
+
+    pub fn can_lower_to(&self, hz: u32) -> String {
+        match self.language {
+            Language::PtBr => format!("pode baixar para {hz} Hz"),
+            Language::En => format!("can go down to {hz} Hz"),
+        }
+    }
+
+    pub fn dim_screen_to(&self, percent: u8) -> String {
+        match self.language {
+            Language::PtBr => format!("Reduzir o brilho para {percent}%"),
+            Language::En => format!("Lower the brightness to {percent}%"),
         }
     }
 
@@ -582,6 +634,7 @@ impl Texts {
         match kind {
             HistoryKind::GameMode => self.game_mode,
             HistoryKind::Cleanup => self.cleanup,
+            HistoryKind::EcoMode => self.eco_mode,
         }
     }
 
@@ -608,6 +661,8 @@ impl Texts {
             (Language::PtBr, Summary::GameMode { game: None, seconds }) => format!("Modo Jogo por {}", format_duration(*seconds)),
             (Language::En, Summary::GameMode { game: Some(game), seconds }) => format!("{game} for {}", format_duration(*seconds)),
             (Language::En, Summary::GameMode { game: None, seconds }) => format!("Game Mode for {}", format_duration(*seconds)),
+            (Language::PtBr, Summary::EcoMode { eco_seconds }) => format!("Modo Economia por {}", format_duration(*eco_seconds)),
+            (Language::En, Summary::EcoMode { eco_seconds }) => format!("Eco Mode for {}", format_duration(*eco_seconds)),
         }
     }
 
@@ -739,7 +794,7 @@ pub static PT_BR: Texts = Texts {
     permission_denied_clean: "Permissão negada: os itens do sistema não foram limpos.",
     admin_no_result: "o modo administrador não devolveu resultado",
 
-    history_subtitle: "Limpezas feitas e sessões de Modo Jogo.",
+    history_subtitle: "Limpezas feitas e sessões de Modo Jogo e Modo Economia.",
     history_empty: "Nada por aqui ainda.",
 
     settings_subtitle: "Aparência e preferências do app.",
@@ -777,6 +832,30 @@ pub static PT_BR: Texts = Texts {
     save_report_title: "Salvar relatório",
     text_filter: "Texto",
     open_file: "Abrir",
+
+    eco_mode: "Modo Economia",
+    eco_mode_subtitle: "Gasta menos energia para a bateria durar mais e devolve tudo ao encerrar.",
+    activate_eco: "Ativar Modo Economia",
+    deactivate_eco: "Encerrar Modo Economia",
+    eco_programs_hint: "A lista é a mesma do Modo Jogo. Para incluir outro programa, adicione por lá.",
+    eco_power_efficiency: "Ativar Melhor eficiência de energia",
+    eco_energy_saver: "Ligar a Economia de energia na bateria",
+    eco_lower_refresh: "Baixar a taxa de atualização da tela",
+    eco_end_when_plugged: "Encerrar ao conectar o carregador",
+    eco_reopen_on_exit: "Reabrir programas ao encerrar",
+    eco_on_battery: "Na bateria. O Modo Economia encerra sozinho quando o carregador for conectado.",
+    eco_waiting_unplug: "Carregador conectado. O Modo Economia passa a acompanhar a bateria quando ele for desconectado.",
+    eco_manual: "Encerre quando não precisar mais economizar.",
+    energy_saver: "Economia de energia",
+    saver_on: "ligada",
+    saver_only_on_battery: "o Windows só liga na bateria",
+    could_not_set_efficiency: "não foi possível ativar Melhor eficiência de energia",
+    brightness: "Brilho da tela",
+    brightness_hint: "ajuste o brilho em Win+A",
+    could_not_change: "não foi possível alterar",
+    restored: "voltou ao que era",
+    lenovo_select_battery: "para economizar mais, selecione Economia de bateria no Lenovo Vantage",
+    step_screen: "Ajustando a tela",
 };
 
 pub static EN: Texts = Texts {
@@ -889,7 +968,7 @@ pub static EN: Texts = Texts {
     permission_denied_clean: "Permission denied: the system items were not cleaned.",
     admin_no_result: "the administrator mode returned no result",
 
-    history_subtitle: "Cleanups done and Game Mode sessions.",
+    history_subtitle: "Cleanups done and Game Mode and Eco Mode sessions.",
     history_empty: "Nothing here yet.",
 
     settings_subtitle: "Appearance and app preferences.",
@@ -927,6 +1006,30 @@ pub static EN: Texts = Texts {
     save_report_title: "Save report",
     text_filter: "Text",
     open_file: "Open",
+
+    eco_mode: "Eco Mode",
+    eco_mode_subtitle: "Spends less power so the battery lasts longer, and puts everything back when it ends.",
+    activate_eco: "Turn on Eco Mode",
+    deactivate_eco: "End Eco Mode",
+    eco_programs_hint: "The list is the same as in Game Mode. To include another program, add it there.",
+    eco_power_efficiency: "Turn on Best power efficiency",
+    eco_energy_saver: "Turn on Energy saver while on battery",
+    eco_lower_refresh: "Lower the screen refresh rate",
+    eco_end_when_plugged: "End when the charger is plugged in",
+    eco_reopen_on_exit: "Reopen programs when it ends",
+    eco_on_battery: "On battery. Eco Mode ends by itself when the charger is plugged in.",
+    eco_waiting_unplug: "Charger plugged in. Eco Mode starts following the battery once it is unplugged.",
+    eco_manual: "End it when you no longer need to save power.",
+    energy_saver: "Energy saver",
+    saver_on: "on",
+    saver_only_on_battery: "Windows only turns it on while on battery",
+    could_not_set_efficiency: "could not turn on Best power efficiency",
+    brightness: "Screen brightness",
+    brightness_hint: "set the brightness in Win+A",
+    could_not_change: "could not be changed",
+    restored: "back to what it was",
+    lenovo_select_battery: "to save more, select Battery saving in Lenovo Vantage",
+    step_screen: "Adjusting the screen",
 };
 
 #[cfg(test)]

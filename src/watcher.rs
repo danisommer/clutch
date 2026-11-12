@@ -1,7 +1,7 @@
-//! Watcher: a windowless process that follows the game and restores the computer when it exits.
+//! Watcher: a windowless process that follows the game, or the charger in Eco Mode, and restores the computer when the session is over.
 
 use std::os::windows::process::CommandExt;
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -9,6 +9,7 @@ use std::time::Duration;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
 use windows_sys::Win32::System::Threading::{CreateMutexW, OpenMutexW};
 
+use crate::storage::{LastSummary, Session};
 use crate::{game_mode, i18n, storage, system};
 
 pub const ARG: &str = "--watcher";
@@ -72,17 +73,42 @@ pub fn start() -> bool {
     }
 }
 
-/// Waits for the game to start and exit, then restores the computer, saves the summary and shows the window.
+/// What tells that a session is over: the game exiting, or the charger being plugged in.
+pub enum Watch {
+    Game(PathBuf),
+    Charger,
+}
+
+impl Watch {
+    /// What to follow for a session; `None` when it only ends by hand.
+    pub fn of(session: &Session) -> Option<Watch> {
+        match (&session.game_folder, &session.eco) {
+            (Some(folder), _) => Some(Watch::Game(PathBuf::from(folder))),
+            (None, Some(eco)) if eco.end_when_plugged_in => Some(Watch::Charger),
+            (None, _) => None,
+        }
+    }
+
+    /// Whether what is followed is still going: the game running, or the computer on battery.
+    pub fn ongoing(&self) -> bool {
+        match self {
+            Watch::Game(folder) => game_mode::game_running(folder),
+            Watch::Charger => system::on_ac_power() == Some(false),
+        }
+    }
+}
+
+/// Waits for what the session follows to start and stop, then restores the computer, saves the summary and shows the window.
 pub fn run() -> i32 {
     let Some(_marker) = create_marker(WATCHER_MUTEX) else { return 0 };
-    let Some(folder) = storage::load_session().and_then(|s| s.game_folder) else { return 0 };
+    let Some(watch) = storage::load_session().as_ref().and_then(Watch::of) else { return 0 };
     let mut seen = false;
     let mut misses = 0;
     loop {
         if !storage::session_active() {
             return 0;
         }
-        match (game_mode::game_running(Path::new(&folder)), seen) {
+        match (watch.ongoing(), seen) {
             (true, _) => {
                 seen = true;
                 misses = 0;
@@ -97,8 +123,8 @@ pub fn run() -> i32 {
     }
     let Some(session) = storage::claim_session() else { return 0 };
     let config = storage::load_config();
-    let items = game_mode::deactivate(&session, config.reopen_on_exit, i18n::texts_for(config.language));
-    let _ = storage::save_last_summary(&items);
+    let items = game_mode::deactivate(&session, config.reopens(&session), i18n::texts_for(config.language));
+    let _ = storage::save_last_summary(&LastSummary { eco: session.eco.is_some(), items });
     if !marker_exists(WINDOW_MUTEX) {
         if let Ok(exe) = std::env::current_exe() {
             system::shell_open(&exe.to_string_lossy());

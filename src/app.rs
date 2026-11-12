@@ -17,6 +17,7 @@ use eframe::egui::{
 use crate::admin;
 use crate::cleanup::{self, Analysis, Catalog, Category, CleanupResult, Group};
 use crate::debloat::{self, ItemState, Section};
+use crate::eco_mode;
 use crate::game_mode::{self, Item, Status};
 use crate::i18n::{self, Texts};
 use crate::games::{self, Game};
@@ -25,7 +26,8 @@ use crate::storage::{
     ThemeChoice,
 };
 use crate::theme::{self, *};
-use crate::{APP_NAME, system, watcher};
+use crate::watcher::{self, Watch};
+use crate::{APP_NAME, system};
 
 const NAV_WIDTH: f32 = 252.0;
 const TITLE_BAR_HEIGHT: f32 = 40.0;
@@ -35,14 +37,45 @@ const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     GameMode,
+    EcoMode,
     Cleanup,
     Debloat,
     History,
     Settings,
 }
 
+/// The two modes that hold a session; only one session exists at a time.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum GamePhase {
+enum Mode {
+    Game,
+    Eco,
+}
+
+impl Mode {
+    fn of(eco: bool) -> Mode {
+        match eco {
+            true => Mode::Eco,
+            false => Mode::Game,
+        }
+    }
+
+    fn page(self) -> Page {
+        match self {
+            Mode::Game => Page::GameMode,
+            Mode::Eco => Page::EcoMode,
+        }
+    }
+
+    fn title(self, t: &Texts) -> &'static str {
+        match self {
+            Mode::Game => t.game_mode,
+            Mode::Eco => t.eco_mode,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionPhase {
     Ready,
     Activating,
     Active,
@@ -70,12 +103,13 @@ enum CleanupPhase {
 
 enum Message {
     Overview { items: Vec<Item>, games: Vec<Game> },
+    EcoOverview(Vec<Item>),
     GamePicked(PathBuf),
     Candidates(Vec<(String, String)>),
     GameProgress(String),
     Activated(game_mode::Activation),
-    GameStarted,
-    GameExited,
+    WatchStarted,
+    WatchEnded,
     Deactivated(Vec<Item>),
     CleanupProgress(String),
     Analyzed(Vec<Analysis>),
@@ -89,6 +123,9 @@ enum Message {
 
 enum GameAction {
     Refresh,
+    RefreshEco,
+    ActivateEco,
+    GoTo(Page),
     PickGame,
     RemoveCustomGame(String),
     FindCandidates,
@@ -123,16 +160,19 @@ pub struct App {
     tx: Sender<Message>,
     rx: Receiver<Message>,
     free_space_c: Option<u64>,
-    game_phase: GamePhase,
+    mode: Mode,
+    phase: SessionPhase,
     overview_items: Vec<Item>,
     loading_overview: bool,
+    eco_items: Vec<Item>,
+    loading_eco: bool,
     games: Vec<Game>,
     candidates: Option<Vec<(String, String)>>,
     game_progress: String,
     session: Option<Session>,
     activation_items: Vec<Item>,
     deactivation_items: Vec<Item>,
-    game_running: bool,
+    watch_ongoing: bool,
     monitor: Option<Arc<AtomicBool>>,
     cleanup_phase: CleanupPhase,
     analyses: Vec<Analysis>,
@@ -161,24 +201,28 @@ impl App {
         theme::apply(&cc.egui_ctx, config.theme);
         let (tx, rx) = mpsc::channel();
         let session = storage::load_session();
+        let mode = Mode::of(session.as_ref().is_some_and(|s| s.eco.is_some()));
         let mut app = App {
-            page: Page::GameMode,
+            page: mode.page(),
             t: i18n::texts_for(config.language),
             config,
             catalog: cleanup::catalog(),
             tx,
             rx,
             free_space_c: system::free_space("C:\\"),
-            game_phase: if session.is_some() { GamePhase::Active } else { GamePhase::Ready },
+            mode,
+            phase: if session.is_some() { SessionPhase::Active } else { SessionPhase::Ready },
             overview_items: Vec::new(),
             loading_overview: false,
+            eco_items: Vec::new(),
+            loading_eco: false,
             games: Vec::new(),
             candidates: None,
             game_progress: String::new(),
             session,
             activation_items: Vec::new(),
             deactivation_items: Vec::new(),
-            game_running: false,
+            watch_ongoing: false,
             monitor: None,
             cleanup_phase: CleanupPhase::Idle,
             analyses: Vec::new(),
@@ -202,16 +246,33 @@ impl App {
         };
         app.refresh_overview(&cc.egui_ctx);
         if app.session.is_none() {
-            if let Some(items) = storage::take_last_summary::<Vec<Item>>() {
-                app.deactivation_items = items;
-                app.game_phase = GamePhase::Finished;
+            if let Some(summary) = storage::take_last_summary::<Vec<Item>>() {
+                app.show_summary(summary);
+                app.page = app.mode.page();
             }
         }
-        if let Some(folder) = app.session.as_ref().and_then(|s| s.game_folder.clone()) {
+        if let Some(watch) = app.session.as_ref().and_then(Watch::of) {
             watcher::start();
-            app.start_monitor(&cc.egui_ctx, PathBuf::from(folder));
+            app.start_monitor(&cc.egui_ctx, watch);
         }
         app
+    }
+
+    /// Shows what the watcher restored when it ended a session.
+    fn show_summary(&mut self, summary: storage::LastSummary<Vec<Item>>) {
+        self.mode = Mode::of(summary.eco);
+        self.deactivation_items = summary.items;
+        self.session = None;
+        self.phase = SessionPhase::Finished;
+    }
+
+    fn refresh_eco(&mut self, ctx: &egui::Context) {
+        self.loading_eco = true;
+        let config = self.config.clone();
+        let t = self.t;
+        self.spawn_task(ctx, move |tx, _| {
+            let _ = tx.send(Message::EcoOverview(eco_mode::overview(&config, t)));
+        });
     }
 
     fn spawn_task(&self, ctx: &egui::Context, task: impl FnOnce(&Sender<Message>, &egui::Context) + Send + 'static) {
@@ -267,25 +328,25 @@ impl App {
         self.refresh_overview(ctx);
     }
 
-    /// Follows the game while the window is open, so the page can show whether it is running.
-    fn start_monitor(&mut self, ctx: &egui::Context, folder: PathBuf) {
+    /// Follows the game or the charger while the window is open, so the page can show how the session is going.
+    fn start_monitor(&mut self, ctx: &egui::Context, watch: Watch) {
         let cancel = Arc::new(AtomicBool::new(false));
         self.monitor = Some(cancel.clone());
         self.spawn_task(ctx, move |tx, ctx| {
             let mut seen = false;
             let mut misses = 0;
             while !cancel.load(Ordering::Relaxed) {
-                match (game_mode::game_running(&folder), seen) {
+                match (watch.ongoing(), seen) {
                     (true, false) => {
                         seen = true;
-                        let _ = tx.send(Message::GameStarted);
+                        let _ = tx.send(Message::WatchStarted);
                         ctx.request_repaint();
                     }
                     (true, true) => misses = 0,
                     (false, true) => {
                         misses += 1;
                         if misses >= 2 {
-                            let _ = tx.send(Message::GameExited);
+                            let _ = tx.send(Message::WatchEnded);
                             return;
                         }
                     }
@@ -302,8 +363,24 @@ impl App {
         }
     }
 
+    fn activate_eco(&mut self, ctx: &egui::Context) {
+        self.mode = Mode::Eco;
+        self.phase = SessionPhase::Activating;
+        self.game_progress = self.t.step_preparing.into();
+        let config = self.config.clone();
+        let t = self.t;
+        self.spawn_task(ctx, move |tx, ctx| {
+            let progress = |step: &str| {
+                let _ = tx.send(Message::GameProgress(step.into()));
+                ctx.request_repaint();
+            };
+            let _ = tx.send(Message::Activated(eco_mode::activate(&config, t, &progress)));
+        });
+    }
+
     fn activate(&mut self, ctx: &egui::Context) {
-        self.game_phase = GamePhase::Activating;
+        self.mode = Mode::Game;
+        self.phase = SessionPhase::Activating;
         self.game_progress = self.t.step_preparing.into();
         let config = self.config.effective();
         let t = self.t;
@@ -321,12 +398,12 @@ impl App {
     fn deactivate(&mut self, ctx: &egui::Context) {
         self.stop_monitor();
         self.close_at = None;
-        self.game_phase = GamePhase::Deactivating;
-        let reopen = self.config.reopen_on_exit;
+        self.phase = SessionPhase::Deactivating;
+        let config = self.config.clone();
         let t = self.t;
         self.spawn_task(ctx, move |tx, _| {
             let items = match storage::claim_session() {
-                Some(session) => game_mode::deactivate(&session, reopen, t),
+                Some(session) => game_mode::deactivate(&session, config.reopens(&session), t),
                 None => wait_for_watcher_summary(),
             };
             let _ = tx.send(Message::Deactivated(items));
@@ -440,35 +517,39 @@ impl App {
                     self.games = games;
                     self.loading_overview = false;
                 }
+                Message::EcoOverview(items) => {
+                    self.eco_items = items;
+                    self.loading_eco = false;
+                }
                 Message::Candidates(list) => self.candidates = Some(list),
                 Message::GamePicked(exe) => self.add_custom_game(ctx, exe),
                 Message::GameProgress(step) => self.game_progress = step,
                 Message::Activated(activation) => {
                     let has_warning = activation.items.iter().any(|i| i.status == Status::Warning);
                     self.activation_items = activation.items;
-                    let folder = activation.session.game_folder.clone();
+                    let watch = Watch::of(&activation.session);
                     self.session = Some(activation.session);
-                    self.game_phase = GamePhase::Active;
-                    self.game_running = false;
-                    if let Some(f) = folder {
+                    self.phase = SessionPhase::Active;
+                    self.watch_ongoing = false;
+                    if let Some(watch) = watch {
                         let watching = watcher::start();
-                        self.start_monitor(ctx, PathBuf::from(f));
+                        self.start_monitor(ctx, watch);
                         if watching && !has_warning {
                             self.close_at = Some(Instant::now() + AUTO_CLOSE_DELAY);
                         }
                     }
                 }
-                Message::GameStarted => self.game_running = true,
-                Message::GameExited => {
-                    self.game_running = false;
-                    if self.game_phase == GamePhase::Active && !watcher::is_running() {
+                Message::WatchStarted => self.watch_ongoing = true,
+                Message::WatchEnded => {
+                    self.watch_ongoing = false;
+                    if self.phase == SessionPhase::Active && !watcher::is_running() {
                         self.deactivate(ctx);
                     }
                 }
                 Message::Deactivated(items) => {
                     self.deactivation_items = items;
                     self.session = None;
-                    self.game_phase = GamePhase::Finished;
+                    self.phase = SessionPhase::Finished;
                     self.history = storage::load_history();
                 }
                 Message::CleanupProgress(name) => self.cleanup_progress = name,
@@ -586,19 +667,15 @@ impl App {
         ui.add_space(48.0);
         let pages = [
             (1, Page::GameMode, t.game_mode),
-            (2, Page::Cleanup, t.cleanup),
-            (3, Page::Debloat, t.debloat),
-            (4, Page::History, t.history),
-            (5, Page::Settings, t.settings),
+            (2, Page::EcoMode, t.eco_mode),
+            (3, Page::Cleanup, t.cleanup),
+            (4, Page::Debloat, t.debloat),
+            (5, Page::History, t.history),
+            (6, Page::Settings, t.settings),
         ];
         for (number, page, name) in pages {
             if nav_item(ui, number, name, self.page == page).clicked() {
-                self.page = page;
-                match page {
-                    Page::History => self.history = storage::load_history(),
-                    Page::Settings => self.refresh_custom_rules(),
-                    Page::GameMode | Page::Cleanup | Page::Debloat => {}
-                }
+                self.open_page(ui.ctx(), page);
             }
         }
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
@@ -611,25 +688,42 @@ impl App {
         });
     }
 
-    fn game_mode_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    /// Shows a page and loads what it needs.
+    fn open_page(&mut self, ctx: &egui::Context, page: Page) {
+        self.page = page;
+        match page {
+            Page::History => self.history = storage::load_history(),
+            Page::Settings => self.refresh_custom_rules(),
+            Page::EcoMode if self.phase == SessionPhase::Ready => self.refresh_eco(ctx),
+            Page::GameMode | Page::EcoMode | Page::Cleanup | Page::Debloat => {}
+        }
+    }
+
+    /// The page of Game Mode or Eco Mode. While the other mode holds the session, it only points there.
+    fn mode_page(&mut self, ui: &mut Ui, ctx: &egui::Context, own: Mode) {
         let t = self.t;
-        let action = match self.game_phase {
-            GamePhase::Ready => self.game_ready(ui),
-            GamePhase::Activating => {
-                heading(ui, t.game_mode, t.preparing_subtitle);
+        let action = match (self.phase, self.mode == own, own) {
+            (SessionPhase::Ready, _, Mode::Game) => self.game_ready(ui),
+            (SessionPhase::Ready, _, Mode::Eco) => self.eco_ready(ui),
+            (_, false, _) => self.other_mode_active(ui, own),
+            (SessionPhase::Activating, true, _) => {
+                heading(ui, own.title(t), t.preparing_subtitle);
                 loading(ui, &format!("{}…", self.game_progress));
                 None
             }
-            GamePhase::Active => self.game_active(ui),
-            GamePhase::Deactivating => {
-                heading(ui, t.game_mode, t.restoring_subtitle);
+            (SessionPhase::Active, true, _) => self.session_active(ui),
+            (SessionPhase::Deactivating, true, _) => {
+                heading(ui, own.title(t), t.restoring_subtitle);
                 loading(ui, t.reopening_programs);
                 None
             }
-            GamePhase::Finished => self.game_finished(ui),
+            (SessionPhase::Finished, true, _) => self.session_finished(ui),
         };
         match action {
             Some(GameAction::Refresh) => self.refresh_overview(ctx),
+            Some(GameAction::RefreshEco) => self.refresh_eco(ctx),
+            Some(GameAction::ActivateEco) => self.activate_eco(ctx),
+            Some(GameAction::GoTo(page)) => self.open_page(ctx, page),
             Some(GameAction::PickGame) => self.pick_game(ctx),
             Some(GameAction::RemoveCustomGame(exe)) => {
                 self.config.custom_games.retain(|g| g.exe != exe);
@@ -656,12 +750,112 @@ impl App {
             Some(GameAction::Deactivate) => self.deactivate(ctx),
             Some(GameAction::KeepOpen) => self.close_at = None,
             Some(GameAction::Back) => {
-                self.game_phase = GamePhase::Ready;
+                self.phase = SessionPhase::Ready;
                 self.free_space_c = system::free_space("C:\\");
-                self.refresh_overview(ctx);
+                match own {
+                    Mode::Game => self.refresh_overview(ctx),
+                    Mode::Eco => self.refresh_eco(ctx),
+                }
             }
             None => {}
         }
+    }
+
+    fn other_mode_active(&mut self, ui: &mut Ui, own: Mode) -> Option<GameAction> {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        let (title, subtitle) = match own {
+            Mode::Game => (t.game_mode, t.game_mode_subtitle),
+            Mode::Eco => (t.eco_mode, t.eco_mode_subtitle),
+        };
+        let active = self.mode.title(t);
+        heading(ui, title, subtitle);
+        ui.label(text(t.other_mode_active(active), regular(14.0), pal.text_muted));
+        ui.add_space(12.0);
+        link(ui, &t.go_to(active), pal.accent_text).clicked().then_some(GameAction::GoTo(self.mode.page()))
+    }
+
+    fn eco_ready(&mut self, ui: &mut Ui) -> Option<GameAction> {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        heading(ui, t.eco_mode, t.eco_mode_subtitle);
+        let mut action = None;
+        let width = ui.available_width();
+        let left = (width * 0.55).floor();
+        let right = width - left - 48.0;
+        let height = ui.available_height() - 80.0;
+        let mut changed = false;
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(left);
+                ui.horizontal(|ui| {
+                    section_label(ui, t.status_section);
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        if link(ui, t.refresh, pal.text_muted).clicked() {
+                            action = Some(GameAction::RefreshEco);
+                        }
+                    });
+                });
+                rule(ui);
+                egui::ScrollArea::vertical().id_salt("eco_overview").max_height(height).show(ui, |ui| {
+                    ui.set_width(left);
+                    match (self.loading_eco, self.eco_items.is_empty()) {
+                        (true, true) => {
+                            ui.add_space(12.0);
+                            loading(ui, t.checking);
+                        }
+                        _ => {
+                            for item in &self.eco_items {
+                                item_row(ui, item, 196.0);
+                            }
+                        }
+                    }
+                });
+            });
+            ui.add_space(48.0);
+            ui.vertical(|ui| {
+                ui.set_width(right);
+                egui::ScrollArea::vertical().id_salt("eco_options").max_height(height + 26.0).show(ui, |ui| {
+                    ui.set_width(right - 14.0);
+                    let eco = &mut self.config.eco;
+                    section_label(ui, t.close_programs_section);
+                    rule(ui);
+                    ui.add_space(8.0);
+                    for program in &self.config.programs {
+                        let mut closes = eco.close.contains(&program.name);
+                        if checkbox(ui, &mut closes, &program.name, true).changed() {
+                            eco.set_closes(&program.name, closes);
+                            changed = true;
+                        }
+                    }
+                    ui.add_space(4.0);
+                    ui.add(egui::Label::new(text(t.eco_programs_hint, regular(12.5), pal.text_muted)).wrap());
+                    ui.add_space(22.0);
+                    section_label(ui, t.system_section);
+                    rule(ui);
+                    ui.add_space(8.0);
+                    changed |= checkbox(ui, &mut eco.shutdown_wsl, t.shutdown_wsl, true).changed();
+                    changed |= checkbox(ui, &mut eco.power_efficiency, t.eco_power_efficiency, true).changed();
+                    changed |= checkbox(ui, &mut eco.energy_saver, t.eco_energy_saver, true).changed();
+                    changed |= checkbox(ui, &mut eco.lower_refresh_rate, t.eco_lower_refresh, true).changed();
+                    changed |= checkbox(ui, &mut eco.dim_screen, &t.dim_screen_to(eco_mode::DIMMED_BRIGHTNESS), true).changed();
+                    ui.add_space(22.0);
+                    section_label(ui, t.on_exit_section);
+                    rule(ui);
+                    ui.add_space(8.0);
+                    changed |= checkbox(ui, &mut eco.end_when_plugged_in, t.eco_end_when_plugged, true).changed();
+                    changed |= checkbox(ui, &mut eco.reopen_on_exit, t.eco_reopen_on_exit, true).changed();
+                });
+            });
+        });
+        if changed {
+            self.save_config();
+        }
+        ui.add_space(24.0);
+        if primary_button(ui, t.activate_eco, 240.0, !self.loading_eco).clicked() {
+            action = Some(GameAction::ActivateEco);
+        }
+        action
     }
 
     fn game_ready(&mut self, ui: &mut Ui) -> Option<GameAction> {
@@ -821,28 +1015,36 @@ impl App {
         action
     }
 
-    fn game_active(&mut self, ui: &mut Ui) -> Option<GameAction> {
+    fn session_active(&mut self, ui: &mut Ui) -> Option<GameAction> {
         let pal = palette(ui.ctx());
         let t = self.t;
         let mut action = None;
         let Some(session) = &self.session else { return Some(GameAction::Back) };
-        ui.label(text(t.game_mode, semibold(40.0), pal.text));
+        let (title, end_label) = match self.mode {
+            Mode::Game => (t.game_mode, t.deactivate),
+            Mode::Eco => (t.eco_mode, t.deactivate_eco),
+        };
+        ui.label(text(title, semibold(40.0), pal.text));
         ui.add_space(4.0);
         tag(ui, t.active_tag, pal.accent_text);
         ui.add_space(26.0);
         let elapsed = storage::now_epoch().saturating_sub(session.started_at);
         ui.label(text(storage::format_duration(elapsed), light(72.0), pal.text));
-        let status_line = match (&session.game, self.game_running) {
-            (Some(g), true) => t.game_running(&g.name),
-            (Some(g), false) => t.waiting_for_game(&g.name),
-            (None, _) => t.no_game_chosen.to_string(),
+        let ends_when_plugged_in = session.eco.as_ref().is_some_and(|eco| eco.end_when_plugged_in);
+        let status_line = match (self.mode, &session.game, self.watch_ongoing) {
+            (Mode::Game, Some(g), true) => t.game_running(&g.name),
+            (Mode::Game, Some(g), false) => t.waiting_for_game(&g.name),
+            (Mode::Game, None, _) => t.no_game_chosen.to_string(),
+            (Mode::Eco, _, true) => t.eco_on_battery.to_string(),
+            (Mode::Eco, _, false) if ends_when_plugged_in => t.eco_waiting_unplug.to_string(),
+            (Mode::Eco, _, false) => t.eco_manual.to_string(),
         };
         ui.label(text(status_line, regular(15.0), pal.text_muted));
         if let Some(deadline) = self.close_at {
             let remaining = deadline.saturating_duration_since(Instant::now()).as_secs() + 1;
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label(text(t.window_closes_in(remaining), regular(13.0), pal.text_muted));
+                ui.label(text(t.window_closes_in(remaining, title), regular(13.0), pal.text_muted));
                 if link(ui, t.keep_open, pal.accent_text).clicked() {
                     action = Some(GameAction::KeepOpen);
                 }
@@ -862,16 +1064,16 @@ impl App {
             }
         });
         ui.add_space(20.0);
-        if secondary_button(ui, t.deactivate, 240.0).clicked() {
+        if secondary_button(ui, end_label, 240.0).clicked() {
             action = Some(GameAction::Deactivate);
         }
         action
     }
 
-    fn game_finished(&mut self, ui: &mut Ui) -> Option<GameAction> {
+    fn session_finished(&mut self, ui: &mut Ui) -> Option<GameAction> {
         let pal = palette(ui.ctx());
         let t = self.t;
-        heading(ui, t.game_mode, t.finished_subtitle);
+        heading(ui, self.mode.title(t), t.finished_subtitle);
         section_label(ui, t.on_exit_section);
         rule(ui);
         if self.deactivation_items.is_empty() {
@@ -1290,6 +1492,7 @@ impl App {
                 self.config.language = choice;
                 self.t = i18n::texts_for(choice);
                 self.save_config();
+                self.eco_items.clear();
                 self.refresh_overview(ctx);
             }
         }
@@ -1355,12 +1558,10 @@ impl App {
         if storage::session_active() {
             return;
         }
-        if let Some(items) = storage::take_last_summary::<Vec<Item>>() {
+        if let Some(summary) = storage::take_last_summary::<Vec<Item>>() {
             self.stop_monitor();
             self.close_at = None;
-            self.deactivation_items = items;
-            self.session = None;
-            self.game_phase = GamePhase::Finished;
+            self.show_summary(summary);
             self.history = storage::load_history();
         }
     }
@@ -1369,8 +1570,8 @@ impl App {
 /// Used when the watcher claimed the session first: waits up to 30 s for its summary.
 fn wait_for_watcher_summary() -> Vec<Item> {
     for _ in 0..60 {
-        if let Some(items) = storage::take_last_summary::<Vec<Item>>() {
-            return items;
+        if let Some(summary) = storage::take_last_summary::<Vec<Item>>() {
+            return summary.items;
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -1380,7 +1581,7 @@ fn wait_for_watcher_summary() -> Vec<Item> {
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.stop_monitor();
-        if storage::session_active() && self.session.as_ref().is_some_and(|s| s.game_folder.is_some()) {
+        if storage::session_active() && self.session.as_ref().is_some_and(|s| Watch::of(s).is_some()) {
             watcher::start();
         }
     }
@@ -1388,7 +1589,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let pal = palette(ctx);
         self.receive(ctx);
-        if self.game_phase == GamePhase::Active {
+        if self.phase == SessionPhase::Active {
             ctx.request_repaint_after(Duration::from_secs(1));
             self.follow_watcher();
             if self.close_at.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -1409,7 +1610,8 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(pal.background).inner_margin(Margin { left: 48, right: 56, top: 4, bottom: 32 }))
             .show(ctx, |ui| match self.page {
-                Page::GameMode => self.game_mode_page(ui, ctx),
+                Page::GameMode => self.mode_page(ui, ctx, Mode::Game),
+                Page::EcoMode => self.mode_page(ui, ctx, Mode::Eco),
                 Page::Cleanup => self.cleanup_page(ui, ctx),
                 Page::Debloat => self.debloat_page(ui, ctx),
                 Page::History => self.history_page(ui),

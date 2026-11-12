@@ -36,6 +36,21 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
 - **Per-game settings**: a chosen game can keep its own list of programs to close, WSL and power choices. The profile starts as a copy of the general settings and can be turned off to use them again.
 - **Automatic restore**: the window closes itself to free memory, and a small background watcher (about 8 MB of RAM) follows the game. When the game exits, the watcher restores the previous power mode, reopens the programs that were closed and shows a summary.
 
+### Eco Mode
+
+The opposite of Game Mode, for when the battery has to last. Everything it changes is put back when it ends.
+
+- **Status overview**: charger, Windows power mode, Energy Saver, refresh rate and brightness of the laptop screen, WSL, and the thermal mode on Lenovo laptops.
+- **Lower power use**, each part optional:
+  - switches the Windows power mode to *Best power efficiency*;
+  - makes Windows Energy Saver come on at any battery level (Windows only turns it on while on battery);
+  - lowers the laptop screen to its lowest refresh rate from 60 Hz up;
+  - dims the laptop screen to 40%, and never raises it.
+- **Programs and WSL**: optionally closes programs of the Game Mode list, with the same safe closing, and shuts WSL down unless some program is using it.
+- **Automatic end**: the background watcher ends Eco Mode when the charger is plugged in, restores everything and shows a summary. It can also be ended by hand at any time.
+
+Game Mode and Eco Mode are never on together, because both set the power mode.
+
 ### Cleanup
 
 - **Analysis first**: the app analyzes before anything is touched and shows the size of each category. You check what to clean.
@@ -67,7 +82,7 @@ Every change can be undone back to the Windows default, except app removals; for
 
 ### History
 
-A list of the cleanups done, with space freed, and of past Game Mode sessions.
+A list of the cleanups done, with space freed, and of past Game Mode and Eco Mode sessions.
 
 ### Accessibility
 
@@ -206,7 +221,8 @@ src/
   theme.rs       light and dark palettes, fonts and widgets
   i18n.rs        every text shown to the user, in Portuguese and English
   game_mode.rs   status checks, closing programs, activation and restore
-  watcher.rs     background process that ends the session when the game exits
+  eco_mode.rs    Eco Mode: status checks, activation and what it restores
+  watcher.rs     background process that ends the session when the game exits or the charger is plugged in
   cleanup.rs     catalog, safety rules, analysis and removal
   debloat.rs     Decrapify: catalog, state of each item, apply and undo
   admin.rs       elevated helper
@@ -237,6 +253,7 @@ Planned:
 - [ ] Support for more laptop vendors' performance modes (ASUS, MSI, Dell, HP, Acer…)
 - [x] Deeper cleanup and optimization that stays safe and customizable
 - [x] Turn off Windows data collection, ads and bundled apps (Decrapify)
+- [x] Eco Mode, the opposite of Game Mode, for battery life
 - [ ] More features in general
 
 Ideas:
