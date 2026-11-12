@@ -72,7 +72,7 @@ jobs:
             version     = $tag.TrimStart('v')
             description = 'Game Mode and safe storage cleanup for Windows'
             homepage    = "https://github.com/$repository"
-            license     = 'Proprietary'
+            license     = 'MIT'
             url         = "https://github.com/$repository/releases/download/$tag/Clutch.exe"
             hash        = $hash
             bin         = 'Clutch.exe'
