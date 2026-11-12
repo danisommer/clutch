@@ -337,10 +337,16 @@ impl Texts {
             (Language::PtBr, Launcher::Steam) => "não foi possível abrir pela Steam",
             (Language::PtBr, Launcher::Epic) => "não foi possível abrir pela Epic Games",
             (Language::PtBr, Launcher::Gog) => "não foi possível abrir o executável do jogo da GOG",
+            (Language::PtBr, Launcher::Ea) => "não foi possível abrir o executável do jogo da EA",
+            (Language::PtBr, Launcher::BattleNet) => "não foi possível abrir pela Battle.net",
+            (Language::PtBr, Launcher::Xbox) => "não foi possível abrir pelo app Xbox",
             (Language::PtBr, Launcher::Custom) => "não foi possível abrir o executável escolhido",
             (Language::En, Launcher::Steam) => "could not be launched through Steam",
             (Language::En, Launcher::Epic) => "could not be launched through Epic Games",
             (Language::En, Launcher::Gog) => "could not start the GOG game executable",
+            (Language::En, Launcher::Ea) => "could not start the EA game executable",
+            (Language::En, Launcher::BattleNet) => "could not be launched through Battle.net",
+            (Language::En, Launcher::Xbox) => "could not be launched through the Xbox app",
             (Language::En, Launcher::Custom) => "could not start the chosen executable",
         }
     }
@@ -364,6 +370,9 @@ impl Texts {
             (_, Launcher::Steam) => "Steam",
             (_, Launcher::Epic) => "Epic Games",
             (_, Launcher::Gog) => "GOG",
+            (_, Launcher::Ea) => "EA app",
+            (_, Launcher::BattleNet) => "Battle.net",
+            (_, Launcher::Xbox) => "Xbox",
             (Language::PtBr, Launcher::Custom) => "executável",
             (Language::En, Launcher::Custom) => "executable",
         }

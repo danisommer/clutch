@@ -32,7 +32,7 @@ The executable is not signed yet, so Windows SmartScreen may warn on the first r
   - `Always`.
 - **WSL shutdown**: WSL is shut down unless some program is still using it.
 - **Best performance**: switches the Windows power mode to *Best performance* while you play.
-- **Game launch**: optionally starts a game installed with Steam, Epic Games or GOG, which are found automatically. Any other game (EA app, Battle.net, Ubisoft…) can be added by picking its executable; its folder is then the one the watcher follows.
+- **Game launch**: optionally starts a game installed with Steam, Epic Games, GOG, the EA app, Battle.net or the Xbox app, which are found automatically. Any other game (Ubisoft, Riot…) can be added by picking its executable; its folder is then the one the watcher follows.
 - **Per-game settings**: a chosen game can keep its own list of programs to close, WSL and power choices. The profile starts as a copy of the general settings and can be turned off to use them again.
 - **Automatic restore**: the window closes itself to free memory, and a small background watcher (about 8 MB of RAM) follows the game. When the game exits, the watcher restores the previous power mode, reopens the programs that were closed and shows a summary.
 
@@ -228,7 +228,7 @@ src/
   admin.rs       elevated helper
   storage.rs     settings, history and session files
   steam.rs       Steam libraries and installed games
-  games.rs       games from Steam, Epic Games, GOG and executables added by hand
+  games.rs       games from Steam, Epic Games, GOG, EA app, Battle.net, Xbox app and executables added by hand
   system.rs      Win32 wrappers (processes, windows, power, displays, registry, services)
 categories.json  cleanup catalog
 debloat.json     Decrapify catalog
@@ -262,7 +262,7 @@ Ideas:
 - [x] User-defined cleanup rules in a separate file, on top of the built-in catalog
 - [x] Per-game profiles (which programs to close, power settings)
 - [x] Game launch from other launchers: Epic Games and GOG found automatically, any other game through its executable
-- [ ] Automatic detection of EA app, Battle.net and Xbox app games
+- [x] Automatic detection of EA app, Battle.net and Xbox app games
 - [x] Exportable cleanup report
 - [x] Executable icon and version info embedded as Windows resources
 - [x] CI with tests on every release

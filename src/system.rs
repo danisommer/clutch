@@ -581,9 +581,25 @@ pub fn registry_subkeys_32(path: &str) -> Vec<(String, HashMap<String, String>)>
         .collect()
 }
 
-/// Display names of installed programs, as listed in Settings > Apps.
-pub fn installed_programs() -> Vec<String> {
-    let mut names = Vec::new();
+/// Names of the subkeys of a registry key.
+pub fn registry_subkey_names(local_machine: bool, path: &str) -> Vec<String> {
+    registry_root(local_machine)
+        .open_subkey_with_flags(path, KEY_READ)
+        .map(|key| key.enum_keys().flatten().collect())
+        .unwrap_or_default()
+}
+
+/// A program listed in Settings > Apps, as its installer registered it. The location and the uninstall command may be empty.
+#[derive(Clone, Debug, Default)]
+pub struct InstalledProgram {
+    pub name: String,
+    pub install_location: String,
+    pub uninstall_string: String,
+}
+
+/// Programs listed in Settings > Apps, for all users and for the current one.
+pub fn uninstall_entries() -> Vec<InstalledProgram> {
+    let mut programs = Vec::new();
     let path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     let sources = [
         (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_64KEY),
@@ -592,14 +608,23 @@ pub fn installed_programs() -> Vec<String> {
     ];
     for (root, flags) in sources {
         if let Ok(key) = RegKey::predef(root).open_subkey_with_flags(path, flags) {
-            for sub in key.enum_keys().flatten() {
-                if let Ok(name) = key.open_subkey_with_flags(&sub, flags).and_then(|s| s.get_value::<String, _>("DisplayName")) {
-                    names.push(name);
+            for entry in key.enum_keys().flatten().filter_map(|sub| key.open_subkey_with_flags(&sub, flags).ok()) {
+                if let Ok(name) = entry.get_value::<String, _>("DisplayName") {
+                    programs.push(InstalledProgram {
+                        name,
+                        install_location: entry.get_value("InstallLocation").unwrap_or_default(),
+                        uninstall_string: entry.get_value("UninstallString").unwrap_or_default(),
+                    });
                 }
             }
         }
     }
-    names
+    programs
+}
+
+/// Display names of installed programs, as listed in Settings > Apps.
+pub fn installed_programs() -> Vec<String> {
+    uninstall_entries().into_iter().map(|program| program.name).collect()
 }
 
 pub fn known_folder(id: &GUID) -> Option<PathBuf> {
@@ -717,11 +742,11 @@ pub fn shell_open(target: &str) -> bool {
     result as isize > 32
 }
 
-/// Starts a program through the Windows shell with `dir` as its working folder, as games expect.
-pub fn shell_open_in(target: &str, dir: &Path) -> bool {
+/// Starts a program through the Windows shell with `args` and with `dir` as its working folder, as games expect.
+pub fn shell_open_in(target: &str, args: &str, dir: &Path) -> bool {
     let dir = wide(&dir.to_string_lossy());
     let result = unsafe {
-        ShellExecuteW(std::ptr::null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), std::ptr::null(), dir.as_ptr(), SW_SHOWNORMAL)
+        ShellExecuteW(std::ptr::null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), wide(args).as_ptr(), dir.as_ptr(), SW_SHOWNORMAL)
     };
     result as isize > 32
 }

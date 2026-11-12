@@ -36,6 +36,9 @@ pub enum Launcher {
     Steam,
     Epic,
     Gog,
+    Ea,
+    BattleNet,
+    Xbox,
     Custom,
 }
 
