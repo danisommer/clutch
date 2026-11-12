@@ -4,6 +4,7 @@ mod admin;
 mod app;
 mod cleanup;
 mod debloat;
+mod drivers;
 mod eco_mode;
 mod game_mode;
 mod games;
@@ -13,6 +14,7 @@ mod storage;
 mod system;
 mod theme;
 mod watcher;
+mod xml;
 
 use std::sync::Arc;
 

@@ -17,6 +17,7 @@ use eframe::egui::{
 use crate::admin;
 use crate::cleanup::{self, Analysis, Catalog, Category, CleanupResult, Group};
 use crate::debloat::{self, ItemState, Section};
+use crate::drivers::{self, GpuUpdate};
 use crate::eco_mode;
 use crate::game_mode::{self, Item, Status};
 use crate::i18n::{self, Texts};
@@ -39,6 +40,7 @@ enum Page {
     GameMode,
     EcoMode,
     Cleanup,
+    Drivers,
     Debloat,
     History,
     Settings,
@@ -92,6 +94,15 @@ enum DebloatPhase {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum DriversPhase {
+    Idle,
+    Checking,
+    Listed,
+    Installing,
+    Downloading,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum CleanupPhase {
     Idle,
     Analyzing,
@@ -119,6 +130,17 @@ enum Message {
     ReportSaved(Result<PathBuf, String>),
     DebloatAnalyzed(HashMap<String, ItemState>),
     DebloatDone { action: debloat::Action, ids: Vec<String>, outcomes: Vec<debloat::Outcome>, warning: Option<String> },
+    DriversStep(drivers::Step),
+    DriversChecked(drivers::Check),
+    DriversInstalled(Result<drivers::InstallReport, String>),
+    VendorInstaller(Result<(), drivers::InstallerError>),
+}
+
+enum DriversAction {
+    Check,
+    Install,
+    RunInstaller(String),
+    OpenPage(&'static str),
 }
 
 enum GameAction {
@@ -191,6 +213,13 @@ pub struct App {
     debloat_selection: HashSet<String>,
     debloat_outcomes: Vec<debloat::Outcome>,
     debloat_warning: Option<String>,
+    drivers_phase: DriversPhase,
+    drivers_step: drivers::Step,
+    driver_check: Option<drivers::Check>,
+    driver_selection: HashSet<String>,
+    driver_restore_point: bool,
+    driver_report: Option<Result<drivers::InstallReport, String>>,
+    vendor_installer: Option<Result<(), drivers::InstallerError>>,
     _window_marker: Option<watcher::Marker>,
     close_at: Option<Instant>,
 }
@@ -241,6 +270,13 @@ impl App {
             debloat_selection: HashSet::new(),
             debloat_outcomes: Vec::new(),
             debloat_warning: None,
+            drivers_phase: DriversPhase::Idle,
+            drivers_step: drivers::Step::Graphics,
+            driver_check: None,
+            driver_selection: HashSet::new(),
+            driver_restore_point: true,
+            driver_report: None,
+            vendor_installer: None,
             _window_marker: watcher::mark_window(),
             close_at: None,
         };
@@ -598,6 +634,23 @@ impl App {
                     self.debloat_warning = warning;
                     self.analyze_debloat(ctx);
                 }
+                Message::DriversStep(step) => self.drivers_step = step,
+                Message::DriversChecked(check) => {
+                    self.driver_selection.clear();
+                    self.driver_check = Some(check);
+                    self.drivers_phase = DriversPhase::Listed;
+                }
+                Message::DriversInstalled(result) => {
+                    if let Ok(report) = &result {
+                        self.driver_selection.retain(|id| !report.results.iter().any(|r| &r.id == id && r.succeeded()));
+                    }
+                    self.driver_report = Some(result);
+                    self.drivers_phase = DriversPhase::Listed;
+                }
+                Message::VendorInstaller(result) => {
+                    self.vendor_installer = Some(result);
+                    self.drivers_phase = DriversPhase::Listed;
+                }
                 Message::Cleaned { results, warning } => {
                     self.report_status = None;
                     self.results = results;
@@ -669,9 +722,10 @@ impl App {
             (1, Page::GameMode, t.game_mode),
             (2, Page::EcoMode, t.eco_mode),
             (3, Page::Cleanup, t.cleanup),
-            (4, Page::Debloat, t.debloat),
-            (5, Page::History, t.history),
-            (6, Page::Settings, t.settings),
+            (4, Page::Drivers, t.drivers),
+            (5, Page::Debloat, t.debloat),
+            (6, Page::History, t.history),
+            (7, Page::Settings, t.settings),
         ];
         for (number, page, name) in pages {
             if nav_item(ui, number, name, self.page == page).clicked() {
@@ -695,7 +749,7 @@ impl App {
             Page::History => self.history = storage::load_history(),
             Page::Settings => self.refresh_custom_rules(),
             Page::EcoMode if self.phase == SessionPhase::Ready => self.refresh_eco(ctx),
-            Page::GameMode | Page::EcoMode | Page::Cleanup | Page::Debloat => {}
+            Page::GameMode | Page::EcoMode | Page::Cleanup | Page::Drivers | Page::Debloat => {}
         }
     }
 
@@ -1430,6 +1484,186 @@ impl App {
         action
     }
 
+    fn check_drivers(&mut self, ctx: &egui::Context) {
+        self.drivers_phase = DriversPhase::Checking;
+        self.drivers_step = drivers::Step::Graphics;
+        self.driver_report = None;
+        self.vendor_installer = None;
+        self.spawn_task(ctx, move |tx, ctx| {
+            let progress = |step: drivers::Step| {
+                let _ = tx.send(Message::DriversStep(step));
+                ctx.request_repaint();
+            };
+            let _ = tx.send(Message::DriversChecked(drivers::check(&progress)));
+        });
+    }
+
+    /// Installs the checked Windows Update drivers through one elevated run.
+    fn install_drivers(&mut self, ctx: &egui::Context) {
+        self.drivers_phase = DriversPhase::Installing;
+        let t = self.t;
+        let ids: Vec<String> = self.driver_selection.iter().cloned().collect();
+        let restore_point = self.driver_restore_point;
+        self.spawn_task(ctx, move |tx, _| {
+            let result = match admin::install_drivers(&ids, restore_point) {
+                Ok(report) => report.map_err(|error| t.windows_update_failed(&error)),
+                Err(error) => Err(t.admin_error(error, t.permission_denied_drivers)),
+            };
+            let _ = tx.send(Message::DriversInstalled(result));
+        });
+    }
+
+    /// Downloads the graphics vendor's installer and starts it once its signature is confirmed.
+    fn run_vendor_installer(&mut self, ctx: &egui::Context, address: String) {
+        self.drivers_phase = DriversPhase::Downloading;
+        self.spawn_task(ctx, move |tx, _| {
+            let _ = tx.send(Message::VendorInstaller(drivers::run_amd_installer(&address, &admin::exchange_dir())));
+        });
+    }
+
+    fn drivers_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        heading(ui, t.drivers, t.drivers_subtitle);
+        let action = match self.drivers_phase {
+            DriversPhase::Idle => {
+                ui.add(egui::Label::new(text(t.drivers_intro, regular(14.0), pal.text_muted)).wrap());
+                ui.add_space(20.0);
+                primary_button(ui, t.check_drivers, 240.0, true).clicked().then_some(DriversAction::Check)
+            }
+            DriversPhase::Checking => {
+                loading(ui, match self.drivers_step {
+                    drivers::Step::Graphics => t.checking_graphics,
+                    drivers::Step::WindowsUpdate => t.checking_windows_update,
+                });
+                None
+            }
+            DriversPhase::Installing => {
+                loading(ui, t.installing_drivers);
+                None
+            }
+            DriversPhase::Downloading => {
+                loading(ui, t.downloading_installer);
+                None
+            }
+            DriversPhase::Listed => self.drivers_list(ui),
+        };
+        match action {
+            Some(DriversAction::Check) => self.check_drivers(ctx),
+            Some(DriversAction::Install) => self.install_drivers(ctx),
+            Some(DriversAction::RunInstaller(address)) => self.run_vendor_installer(ctx, address),
+            Some(DriversAction::OpenPage(address)) => {
+                system::shell_open(address);
+            }
+            None => {}
+        }
+    }
+
+    /// What the last installer download and the last installation left to say, each with whether it is a warning.
+    fn driver_messages(&self) -> Vec<(String, Status)> {
+        let t = self.t;
+        let mut messages = Vec::new();
+        match &self.vendor_installer {
+            Some(Ok(())) => messages.push((t.installer_started.to_string(), Status::Ok)),
+            Some(Err(error)) => messages.push((t.installer_error(error), Status::Warning)),
+            None => {}
+        }
+        match &self.driver_report {
+            Some(Err(error)) => messages.push((error.clone(), Status::Warning)),
+            Some(Ok(report)) => {
+                let installed = report.results.iter().filter(|r| r.succeeded()).count();
+                if report.restore_point == Some(false) {
+                    messages.push((t.restore_point_failed.to_string(), Status::Warning));
+                }
+                if installed > 0 {
+                    messages.push((t.drivers_installed(installed), Status::Ok));
+                }
+                if report.reboot {
+                    messages.push((t.restart_needed.to_string(), Status::Warning));
+                }
+            }
+            None => {}
+        }
+        messages
+    }
+
+    fn drivers_list(&mut self, ui: &mut Ui) -> Option<DriversAction> {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        let mut action = None;
+        let messages = self.driver_messages();
+        let Some(check) = &self.driver_check else { return Some(DriversAction::Check) };
+        let outcomes: &[drivers::Installed] = match &self.driver_report {
+            Some(Ok(report)) => &report.results,
+            _ => &[],
+        };
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                if link(ui, t.check_again, pal.text_muted).clicked() {
+                    action = Some(DriversAction::Check);
+                }
+            });
+        });
+        for (message, status) in &messages {
+            ui.add(egui::Label::new(text(message, semibold(13.0), status_color(pal, *status))).wrap());
+        }
+        ui.add_space(10.0);
+        let height = ui.available_height() - 104.0;
+        let width = ui.available_width();
+        egui::ScrollArea::vertical().id_salt("drivers").max_height(height).show(ui, |ui| {
+            ui.set_width(width);
+            section_label(ui, t.graphics_section);
+            rule(ui);
+            if check.gpus.is_empty() {
+                ui.add_space(10.0);
+                ui.label(text(t.no_graphics_card, regular(14.0), pal.text_muted));
+                ui.add_space(10.0);
+            }
+            for (gpu, update) in &check.gpus {
+                if let Some(a) = gpu_row(ui, t, gpu, update) {
+                    action = Some(a);
+                }
+            }
+            ui.add_space(22.0);
+            section_label(ui, t.windows_update_section);
+            rule(ui);
+            match &check.updates {
+                Err(error) => {
+                    ui.add_space(10.0);
+                    ui.add(egui::Label::new(text(t.windows_update_failed(error), semibold(13.0), pal.accent_text)).wrap());
+                }
+                Ok(updates) if updates.is_empty() => {
+                    ui.add_space(10.0);
+                    ui.label(text(t.no_driver_updates, regular(14.0), pal.text_muted));
+                }
+                Ok(updates) => {
+                    for update in updates {
+                        let outcome = outcomes.iter().find(|o| o.id == update.id);
+                        update_row(ui, t, update, outcome, &mut self.driver_selection);
+                    }
+                }
+            }
+            ui.add_space(22.0);
+        });
+        rule(ui);
+        ui.add_space(14.0);
+        let selected = self.driver_selection.len();
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                section_label(ui, t.selected);
+                ui.label(text(t.items_count(selected), semibold(24.0), pal.text));
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if primary_button(ui, t.install_selected, 240.0, selected > 0).clicked() {
+                    action = Some(DriversAction::Install);
+                }
+                ui.add_space(16.0);
+                checkbox(ui, &mut self.driver_restore_point, t.restore_point, true);
+            });
+        });
+        action
+    }
+
     fn history_page(&mut self, ui: &mut Ui) {
         let pal = palette(ui.ctx());
         let t = self.t;
@@ -1613,6 +1847,7 @@ impl eframe::App for App {
                 Page::GameMode => self.mode_page(ui, ctx, Mode::Game),
                 Page::EcoMode => self.mode_page(ui, ctx, Mode::Eco),
                 Page::Cleanup => self.cleanup_page(ui, ctx),
+                Page::Drivers => self.drivers_page(ui, ctx),
                 Page::Debloat => self.debloat_page(ui, ctx),
                 Page::History => self.history_page(ui),
                 Page::Settings => self.settings_page(ui, ctx),
@@ -1742,6 +1977,91 @@ fn debloat_row(ui: &mut Ui, t: &Texts, item: &debloat::Item, state: ItemState, s
     ui.add_space(12.0);
     rule(ui);
     action
+}
+
+/// A graphics adapter with its driver and, on the right, what can be done about it.
+fn gpu_row(ui: &mut Ui, t: &Texts, gpu: &drivers::Gpu, update: &GpuUpdate) -> Option<DriversAction> {
+    let pal = palette(ui.ctx());
+    let mut action = None;
+    ui.add_space(12.0);
+    ui.horizontal_top(|ui| {
+        let text_width = ui.available_width() - 320.0;
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
+            ui.horizontal(|ui| {
+                ui.label(text(&gpu.name, semibold(14.5), pal.text));
+                if matches!(update, GpuUpdate::UpToDate) {
+                    tag(ui, t.tag_up_to_date, pal.text_muted);
+                }
+            });
+            let software = gpu.software_version.as_ref().map(|version| format!("  ·  AMD Software {version}")).unwrap_or_default();
+            let details = format!("{}{software}", t.driver_version(&gpu.driver_version, &gpu.driver_date));
+            ui.add(egui::Label::new(text(details, regular(12.5), pal.text_muted)).wrap());
+            if let GpuUpdate::Unknown(error) = update {
+                ui.add(egui::Label::new(text(t.vendor_check_failed(error), regular(12.5), pal.accent_text)).wrap());
+            }
+        });
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| match update {
+            GpuUpdate::Available { version, address } => {
+                if link(ui, t.download_and_install, pal.accent_text).clicked() {
+                    action = Some(DriversAction::RunInstaller(address.clone()));
+                }
+                ui.add_space(12.0);
+                ui.label(text(t.version_available(version), semibold(13.0), pal.text));
+            }
+            GpuUpdate::VendorPage(address) => {
+                if link(ui, t.open_vendor_page, pal.accent_text).clicked() {
+                    action = Some(DriversAction::OpenPage(address));
+                }
+            }
+            GpuUpdate::UpToDate | GpuUpdate::Unknown(_) => {}
+        });
+    });
+    ui.add_space(12.0);
+    rule(ui);
+    action
+}
+
+/// A driver update from Windows Update, with how its installation ended once it was tried.
+fn update_row(ui: &mut Ui, t: &Texts, update: &drivers::Update, outcome: Option<&drivers::Installed>, selection: &mut HashSet<String>) {
+    let pal = palette(ui.ctx());
+    let installed = outcome.is_some_and(drivers::Installed::succeeded);
+    ui.add_space(12.0);
+    ui.horizontal_top(|ui| {
+        let mut checked = selection.contains(&update.id);
+        if bare_checkbox(ui, &mut checked, &update.title, !installed).changed() {
+            match checked {
+                true => selection.insert(update.id.clone()),
+                false => selection.remove(&update.id),
+            };
+        }
+        ui.add_space(10.0);
+        let text_width = ui.available_width() - 120.0;
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
+            ui.add(egui::Label::new(text(&update.title, semibold(14.5), if installed { pal.text_faint } else { pal.text })).wrap());
+            ui.horizontal(|ui| {
+                ui.label(text(format!("{}  ·  {}", update.provider, update.date), regular(12.5), pal.text_muted));
+                if update.is_firmware() {
+                    tag(ui, t.tag_firmware, pal.accent_text);
+                }
+                if installed {
+                    tag(ui, t.tag_installed, pal.text_muted);
+                }
+            });
+            if update.is_firmware() {
+                ui.add(egui::Label::new(text(t.firmware_hint, regular(12.5), pal.accent_text)).wrap());
+            }
+            if let Some(failed) = outcome.filter(|o| !o.succeeded()) {
+                ui.label(text(t.driver_failed(failed.code), semibold(12.5), pal.accent_text));
+            }
+        });
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            ui.label(text(t.size(update.bytes), semibold(14.5), pal.text));
+        });
+    });
+    ui.add_space(12.0);
+    rule(ui);
 }
 
 /// An app uninstalled from this page, with a way back through the Microsoft Store.

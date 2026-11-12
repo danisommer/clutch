@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::storage::{ChosenGame, Config, CustomGame, Launcher};
 use crate::system::InstalledProgram;
-use crate::{steam, system};
+use crate::{steam, system, xml};
 
 const EPIC_MANIFESTS: &str = r"Epic\EpicGamesLauncher\Data\Manifests";
 const GOG_GAMES_KEY: &str = r"SOFTWARE\GOG.com\Games";
@@ -184,38 +184,6 @@ fn folder_key(path: &Path) -> String {
     path.to_string_lossy().trim_end_matches('\\').to_lowercase()
 }
 
-/// XML text without its comments, which often hold examples of the same elements.
-fn without_comments(xml: &str) -> String {
-    let mut text = String::new();
-    let mut rest = xml;
-    while let Some(start) = rest.find("<!--") {
-        text.push_str(&rest[..start]);
-        rest = rest[start..].find("-->").map(|end| &rest[start + end + 3..]).unwrap_or("");
-    }
-    text.push_str(rest);
-    text
-}
-
-fn unescape(text: &str) -> String {
-    text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-}
-
-/// Value of an attribute of the first element with this name.
-fn xml_attribute(xml: &str, element: &str, attribute: &str) -> Option<String> {
-    let open = format!("<{element}");
-    let start = xml.match_indices(&open).map(|(at, _)| at + open.len()).find(|&at| xml[at..].starts_with(char::is_whitespace))?;
-    let tag = &xml[start..start + xml[start..].find('>')?];
-    let marker = format!("{attribute}=\"");
-    let value = tag.match_indices(&marker).find(|(at, _)| tag[..*at].ends_with(char::is_whitespace)).map(|(at, _)| at + marker.len())?;
-    tag[value..].split('"').next().map(unescape)
-}
-
-/// Text of every element with this name that has no attributes.
-fn xml_elements<'a>(xml: &'a str, element: &str) -> Vec<&'a str> {
-    let (open, close) = (format!("<{element}>"), format!("</{element}>"));
-    xml.split(open.as_str()).skip(1).filter_map(|rest| rest.split(close.as_str()).next()).collect()
-}
-
 /// The folder where the EA app installs games now, from its settings.
 fn ea_library() -> Option<PathBuf> {
     let settings = read_text(&PathBuf::from(std::env::var_os("ProgramData")?).join(EA_SETTINGS))?;
@@ -224,7 +192,7 @@ fn ea_library() -> Option<PathBuf> {
 
 /// Launcher paths of an EA install manifest, relative to the game folder. Each comes after the registry value that holds that folder.
 fn ea_launchers(manifest: &str) -> Vec<String> {
-    xml_elements(&without_comments(manifest), "filePath")
+    xml::elements(&xml::without_comments(manifest), "filePath")
         .into_iter()
         .filter_map(|path| path.rsplit(']').next())
         .map(|relative| relative.trim().to_string())
@@ -323,11 +291,11 @@ fn package_family(identity: &str, packages: &[String]) -> Option<String> {
 /// An Xbox app game, from the two manifests in its `Content` folder. It is started as the Microsoft Store app it is.
 fn xbox_game(folder: &Path, packages: &[String]) -> Option<Game> {
     let content = folder.join("Content");
-    let config = without_comments(&read_text(&content.join("MicrosoftGame.config"))?);
-    let manifest = without_comments(&read_text(&content.join("appxmanifest.xml"))?);
-    let family = package_family(&xml_attribute(&config, "Identity", "Name")?, packages)?;
-    let app = xml_attribute(&manifest, "Application", "Id")?;
-    let name = xml_attribute(&config, "ShellVisuals", "DefaultDisplayName").filter(|name| !name.is_empty() && !name.starts_with("ms-resource:"));
+    let config = xml::without_comments(&read_text(&content.join("MicrosoftGame.config"))?);
+    let manifest = xml::without_comments(&read_text(&content.join("appxmanifest.xml"))?);
+    let family = package_family(&xml::attribute(&config, "Identity", "Name")?, packages)?;
+    let app = xml::attribute(&manifest, "Application", "Id")?;
+    let name = xml::attribute(&config, "ShellVisuals", "DefaultDisplayName").filter(|name| !name.is_empty() && !name.starts_with("ms-resource:"));
     Some(Game {
         launcher: Launcher::Xbox,
         launch: Launch::Uri(format!(r"shell:AppsFolder\{family}!{app}")),
@@ -439,21 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_xbox_manifests() {
-        let config = without_comments(
-            r#"<Game configVersion="1">
-                 <Identity Name="Microsoft.4297127D64EC6" Publisher="CN=Microsoft Corporation" Version="2.6.2.0" />
-                 <ExecutableList>
-                   <Executable Name="Minecraft.exe" TargetDeviceFamily="PC" />
-                   <!-- <Identity Name="Example" /> OverrideDisplayName="Xbox Game Override" -->
-                 </ExecutableList>
-                 <ShellVisuals OverrideDisplayName="Wrong" DefaultDisplayName="Ratchet &amp; Clank" />
-               </Game>"#,
-        );
-        assert_eq!(xml_attribute(&config, "Identity", "Name").as_deref(), Some("Microsoft.4297127D64EC6"));
-        assert_eq!(xml_attribute(&config, "ShellVisuals", "DefaultDisplayName").as_deref(), Some("Ratchet & Clank"));
-        assert_eq!(xml_attribute(&config, "ShellVisuals", "DisplayName"), None);
-        assert_eq!(xml_attribute(&config, "Missing", "Name"), None);
+    fn finds_the_family_of_an_xbox_package() {
         let packages = ["Other.App_1.0.0.0_x64__abc".to_string(), "Microsoft.4297127D64EC6_2.6.2.0_x64__8wekyb3d8bbwe".to_string()];
         assert_eq!(package_family("Microsoft.4297127D64EC6", &packages).as_deref(), Some("Microsoft.4297127D64EC6_8wekyb3d8bbwe"));
         assert_eq!(package_family("Not.Installed", &packages), None);

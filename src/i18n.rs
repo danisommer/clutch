@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::admin::AdminError;
 use crate::cleanup::{CustomProblem, Group};
 use crate::debloat::{Failure, Section};
+use crate::drivers::InstallerError;
 use crate::storage::{HistoryDate, HistoryKind, LanguageChoice, Launcher, Stamp, Summary, format_duration};
 use crate::system::{self, PowerMode, RecycleError, ServiceError};
 
@@ -246,6 +247,34 @@ pub struct Texts {
     pub restored: &'static str,
     pub lenovo_select_battery: &'static str,
     pub step_screen: &'static str,
+
+    pub drivers: &'static str,
+    pub drivers_subtitle: &'static str,
+    pub drivers_intro: &'static str,
+    pub check_drivers: &'static str,
+    pub check_again: &'static str,
+    pub checking_graphics: &'static str,
+    pub checking_windows_update: &'static str,
+    pub installing_drivers: &'static str,
+    pub downloading_installer: &'static str,
+    pub graphics_section: &'static str,
+    pub windows_update_section: &'static str,
+    pub tag_up_to_date: &'static str,
+    pub download_and_install: &'static str,
+    pub open_vendor_page: &'static str,
+    pub no_driver_updates: &'static str,
+    pub no_graphics_card: &'static str,
+    pub restore_point: &'static str,
+    pub install_selected: &'static str,
+    pub tag_firmware: &'static str,
+    pub firmware_hint: &'static str,
+    pub tag_installed: &'static str,
+    pub restart_needed: &'static str,
+    pub restore_point_failed: &'static str,
+    pub permission_denied_drivers: &'static str,
+    pub installer_started: &'static str,
+    pub installer_not_signed: &'static str,
+    pub installer_not_started: &'static str,
 }
 
 impl Texts {
@@ -302,6 +331,72 @@ impl Texts {
         match self.language {
             Language::PtBr => format!("Reduzir o brilho para {percent}%"),
             Language::En => format!("Lower the brightness to {percent}%"),
+        }
+    }
+
+    pub fn driver_packages(&self, count: usize) -> String {
+        match (self.language, count) {
+            (Language::PtBr, 1) => "1 pacote antigo".to_string(),
+            (Language::PtBr, n) => format!("{n} pacotes antigos"),
+            (Language::En, 1) => "1 old package".to_string(),
+            (Language::En, n) => format!("{n} old packages"),
+        }
+    }
+
+    pub fn driver_in_use(&self, driver: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("o Windows não removeu {driver}, que ainda está em uso"),
+            Language::En => format!("Windows did not remove {driver}, which is still in use"),
+        }
+    }
+
+    pub fn driver_version(&self, version: &str, date: &str) -> String {
+        format!("Driver {version}  ·  {date}")
+    }
+
+    pub fn version_available(&self, version: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("{version} disponível"),
+            Language::En => format!("{version} available"),
+        }
+    }
+
+    pub fn windows_update_failed(&self, error: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Não foi possível consultar o Windows Update: {error}"),
+            Language::En => format!("Could not ask Windows Update: {error}"),
+        }
+    }
+
+    pub fn vendor_check_failed(&self, error: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("não foi possível consultar o fabricante: {error}"),
+            Language::En => format!("could not check the vendor: {error}"),
+        }
+    }
+
+    pub fn installer_error(&self, error: &InstallerError) -> String {
+        match (self.language, error) {
+            (Language::PtBr, InstallerError::Download(e)) => format!("Não foi possível baixar o instalador: {e}"),
+            (Language::En, InstallerError::Download(e)) => format!("Could not download the installer: {e}"),
+            (_, InstallerError::NotSigned) => self.installer_not_signed.to_string(),
+            (_, InstallerError::NotStarted) => self.installer_not_started.to_string(),
+        }
+    }
+
+    pub fn drivers_installed(&self, count: usize) -> String {
+        match (self.language, count) {
+            (Language::PtBr, 1) => "1 driver instalado.".to_string(),
+            (Language::PtBr, n) => format!("{n} drivers instalados."),
+            (Language::En, 1) => "1 driver installed.".to_string(),
+            (Language::En, n) => format!("{n} drivers installed."),
+        }
+    }
+
+    pub fn driver_failed(&self, code: i32) -> String {
+        match self.language {
+            Language::PtBr => format!("falhou (código {code})"),
+            Language::En => format!("failed (code {code})"),
         }
     }
 
@@ -865,6 +960,34 @@ pub static PT_BR: Texts = Texts {
     restored: "voltou ao que era",
     lenovo_select_battery: "para economizar mais, selecione Economia de bateria no Lenovo Vantage",
     step_screen: "Ajustando a tela",
+
+    drivers: "Drivers",
+    drivers_subtitle: "Procura drivers mais novos no Windows Update e no fabricante da placa de vídeo. Nada é instalado sem você escolher.",
+    drivers_intro: "A busca consulta os servidores da Microsoft e o site do fabricante da placa de vídeo. Pode levar um minuto.",
+    check_drivers: "Procurar atualizações",
+    check_again: "Procurar de novo",
+    checking_graphics: "Verificando a placa de vídeo…",
+    checking_windows_update: "Consultando o Windows Update (pode levar um minuto)…",
+    installing_drivers: "Instalando (pede permissão de administrador e pode levar alguns minutos)…",
+    downloading_installer: "Baixando o instalador do fabricante…",
+    graphics_section: "Placa de vídeo",
+    windows_update_section: "Windows Update",
+    tag_up_to_date: "Em dia",
+    download_and_install: "Baixar e instalar",
+    open_vendor_page: "Abrir a página do fabricante",
+    no_driver_updates: "O Windows Update não tem driver mais novo para este computador.",
+    no_graphics_card: "Nenhuma placa de vídeo AMD, NVIDIA ou Intel encontrada.",
+    restore_point: "Criar um ponto de restauração antes",
+    install_selected: "Instalar selecionados",
+    tag_firmware: "Firmware",
+    firmware_hint: "Atualização de firmware: mantenha o carregador conectado e não desligue o computador durante a instalação.",
+    tag_installed: "Instalado",
+    restart_needed: "Reinicie o computador para concluir a instalação.",
+    restore_point_failed: "O Windows não criou o ponto de restauração, então nada foi instalado. Ative a Proteção do Sistema ou desmarque a opção.",
+    permission_denied_drivers: "Permissão negada: nada foi instalado.",
+    installer_started: "O instalador do fabricante foi aberto. Siga os passos dele.",
+    installer_not_signed: "O arquivo baixado não tem a assinatura do fabricante e foi apagado.",
+    installer_not_started: "Não foi possível abrir o instalador baixado.",
 };
 
 pub static EN: Texts = Texts {
@@ -1039,6 +1162,34 @@ pub static EN: Texts = Texts {
     restored: "back to what it was",
     lenovo_select_battery: "to save more, select Battery saving in Lenovo Vantage",
     step_screen: "Adjusting the screen",
+
+    drivers: "Drivers",
+    drivers_subtitle: "Looks for newer drivers in Windows Update and at the graphics card vendor. Nothing is installed until you choose.",
+    drivers_intro: "The search asks Microsoft's servers and the graphics card vendor's site. It can take a minute.",
+    check_drivers: "Check for updates",
+    check_again: "Check again",
+    checking_graphics: "Checking the graphics card…",
+    checking_windows_update: "Asking Windows Update (it can take a minute)…",
+    installing_drivers: "Installing (it asks for administrator permission and can take a few minutes)…",
+    downloading_installer: "Downloading the vendor's installer…",
+    graphics_section: "Graphics card",
+    windows_update_section: "Windows Update",
+    tag_up_to_date: "Up to date",
+    download_and_install: "Download and install",
+    open_vendor_page: "Open the vendor's page",
+    no_driver_updates: "Windows Update has no newer driver for this computer.",
+    no_graphics_card: "No AMD, NVIDIA or Intel graphics card found.",
+    restore_point: "Create a restore point first",
+    install_selected: "Install selected",
+    tag_firmware: "Firmware",
+    firmware_hint: "Firmware update: keep the charger plugged in and do not turn the computer off while it installs.",
+    tag_installed: "Installed",
+    restart_needed: "Restart the computer to finish the installation.",
+    restore_point_failed: "Windows could not create the restore point, so nothing was installed. Turn on System Protection or uncheck the option.",
+    permission_denied_drivers: "Permission denied: nothing was installed.",
+    installer_started: "The vendor's installer was opened. Follow its steps.",
+    installer_not_signed: "The downloaded file does not carry the vendor's signature and was deleted.",
+    installer_not_started: "The downloaded installer could not be opened.",
 };
 
 #[cfg(test)]

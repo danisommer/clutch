@@ -60,10 +60,18 @@ Game Mode and Eco Mode are never on together, because both set the power mode.
   - npm, pip and Yarn package caches (not preselected);
   - leftovers of uninstalled programs.
 - **Remembered selection**: what you check is remembered when you clean, and the next analysis starts the same way. Settings has a link to go back to the defaults.
-- **Caution group**: categories that can cost you something are tagged and never preselected, not even after you cleaned them once. Examples are the Recycle Bin, AMD and DirectX shader caches, folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
+- **Caution group**: categories that can cost you something are tagged and never preselected, not even after you cleaned them once. Examples are the Recycle Bin, AMD and DirectX shader caches, old driver packages (without them a driver cannot be rolled back), folders of uninstalled Steam games (they may hold replays or mods) and browser profiles of uninstalled browsers.
 - **Elevation only when needed**: administrator rights are requested only for system items. That means one optional prompt to measure them and one prompt to clean them, and only when a selected category has any.
 - **Running programs block their category**: if Chrome is open, its cache is skipped and you can close it from the app.
 - **Report**: the results of a cleanup can be exported to a text file.
+
+### Drivers
+
+Looks for newer drivers and installs only what you choose. It is the only page that goes online, and only when you click: it asks Windows Update and the graphics card vendor's site.
+
+- **Graphics driver from its vendor**: shows the driver of AMD, NVIDIA and Intel graphics cards. For AMD, it compares the installed AMD Software release with the latest one on AMD's site. When there is a newer one, it downloads AMD's own installer, checks that the file carries AMD's digital signature and opens it. NVIDIA and Intel get a link to their drivers page.
+- **Windows Update drivers**: lists the driver updates that Windows Update offers for this computer, which Microsoft tests and signs. Nothing starts checked. A restore point is created first, unless you turn that off; when Windows cannot create it, nothing is installed. Firmware updates are flagged.
+- **Old driver packages**: Cleanup has a Caution category for the driver versions that no device uses and that have a newer version in the driver store. Windows itself refuses to remove a package that is still in use.
 
 ### Decrapify
 
@@ -112,7 +120,9 @@ Deleting files is the riskiest thing this app does, so the rules are enforced in
 - **Files in use** are skipped and counted, never forced.
 - **The elevated helper is the same executable** started with `--admin`:
   - it only accepts category ids that exist in the built-in catalog, and never reads [custom rules](#custom-rules);
+  - it only installs driver updates that its own new search of Windows Update still offers;
   - it only reads and writes files inside the app's exchange folder.
+- **Downloaded installers** run only after Windows confirms a valid signature from the vendor. A file that fails the check is deleted.
 
 ## Requirements
 
@@ -180,6 +190,7 @@ A target's `path` accepts environment variables, `%STEAM%` and `*` wildcards. It
 | `deliveryOptimization` | Runs `Delete-DeliveryOptimizationCache` |
 | `componentStore` | Runs `DISM /Online /Cleanup-Image /StartComponentCleanup` |
 | `recycleBin` | Empties the user's Recycle Bin. It always runs before the other categories, so it never empties what the same cleanup just recycled |
+| `driverStore` | Removes, with `pnputil`, the driver packages that no device uses and that have a newer version in the driver store |
 
 Targets with `"admin": true` run in the elevated helper. Targets with `notInstalled` apply only while none of the listed programs is installed.
 
@@ -225,6 +236,8 @@ src/
   watcher.rs     background process that ends the session when the game exits or the charger is plugged in
   cleanup.rs     catalog, safety rules, analysis and removal
   debloat.rs     Decrapify: catalog, state of each item, apply and undo
+  drivers.rs     driver store, Windows Update drivers and the graphics vendor's installer
+  xml.rs         minimal reading of the XML that Windows tools and launchers write
   admin.rs       elevated helper
   storage.rs     settings, history and session files
   steam.rs       Steam libraries and installed games
@@ -254,6 +267,7 @@ Planned:
 - [x] Deeper cleanup and optimization that stays safe and customizable
 - [x] Turn off Windows data collection, ads and bundled apps (Decrapify)
 - [x] Eco Mode, the opposite of Game Mode, for battery life
+- [x] Driver updates from Windows Update and from AMD, and cleanup of old driver packages
 - [ ] More features in general
 
 Ideas:

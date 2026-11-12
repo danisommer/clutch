@@ -282,6 +282,16 @@
       ]
     },
     {
+      "id": "old-drivers",
+      "name": { "pt-BR": "Pacotes de driver antigos", "en": "Old driver packages" },
+      "description": { "pt-BR": "Versões antigas de drivers que o Windows guarda e nenhum dispositivo usa. Sem elas, não dá para reverter um driver para a versão anterior.", "en": "Old driver versions that Windows keeps and no device uses. Without them, a driver cannot be rolled back to its previous version." },
+      "group": "caution",
+      "selectedByDefault": false,
+      "targets": [
+        { "path": "", "mode": "driverStore", "admin": true }
+      ]
+    },
+    {
       "id": "steam-leftovers",
       "name": { "pt-BR": "Pastas de jogos desinstalados", "en": "Folders of uninstalled games" },
       "description": { "pt-BR": "Pastas na biblioteca da Steam sem jogo instalado. Podem guardar replays, mods ou projetos seus.", "en": "Folders in the Steam library without an installed game. They may hold your replays, mods or projects." },
