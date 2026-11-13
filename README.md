@@ -10,14 +10,14 @@ The interface is available in Brazilian Portuguese and English. By default it fo
 
 ## Download
 
-Prebuilt executables are on the [Releases](https://github.com/danisommer/modo-jogo-limpeza/releases) page. The app is a single portable `Clutch.exe`: download it, put it in any folder and run it. Each release also has:
+Prebuilt executables are on the [Releases](https://github.com/danisommer/clutch/releases) page. The app is a single portable `Clutch.exe`: download it, put it in any folder and run it. Each release also has:
 
 - a `.sha256` file to check the download;
 - `winget-manifest.zip`, the manifest for the Windows Package Manager. The app is not in the winget community repository yet;
 - a [Scoop](https://scoop.sh) manifest, which installs the app and adds a Start menu shortcut:
 
   ```powershell
-  scoop install https://github.com/danisommer/modo-jogo-limpeza/releases/latest/download/clutch.json
+  scoop install https://github.com/danisommer/clutch/releases/latest/download/clutch.json
   ```
 
 The executable is not signed yet, so Windows SmartScreen may warn on the first run. Choose **More info**, then **Run anyway**.
