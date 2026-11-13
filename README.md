@@ -148,7 +148,7 @@ The icon and the version info shown in the file's Properties are embedded by [`b
 ### Releasing
 
 1. Change `version` in `Cargo.toml`, build once so `Cargo.lock` picks it up, and commit both.
-2. Push a tag with the same version, for example `git tag v0.2.0` and `git push origin v0.2.0`.
+2. Push a tag with the same version, for example `git tag v0.2.0` and `git push origin v0.2.0`. Creating the release on GitHub with a new tag `v0.2.0` works too: the workflow adds the files to it.
 
 The [release workflow](.github/workflows/release.yml) runs the tests, builds with the GNU toolchain, requires the embedded resources, checks that the executable only depends on Windows DLLs and publishes the executable, its SHA-256, the Scoop manifest and the winget manifest.
 
