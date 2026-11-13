@@ -546,6 +546,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "clutch"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "serde",
+ "serde_json",
+ "windows-sys 0.59.0",
+ "winreg",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1547,17 +1558,6 @@ checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
  "simd-adler32",
-]
-
-[[package]]
-name = "modo-jogo-limpeza"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "serde",
- "serde_json",
- "windows-sys 0.59.0",
- "winreg",
 ]
 
 [[package]]

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::admin::AdminError;
 use crate::cleanup::{CustomProblem, Group};
 use crate::debloat::{Failure, Section};
+use crate::drivers::InstallerError;
 use crate::storage::{HistoryDate, HistoryKind, LanguageChoice, Launcher, Stamp, Summary, format_duration};
 use crate::system::{self, PowerMode, RecycleError, ServiceError};
 
@@ -222,6 +223,58 @@ pub struct Texts {
     pub save_report_title: &'static str,
     pub text_filter: &'static str,
     pub open_file: &'static str,
+
+    pub eco_mode: &'static str,
+    pub eco_mode_subtitle: &'static str,
+    pub activate_eco: &'static str,
+    pub deactivate_eco: &'static str,
+    pub eco_programs_hint: &'static str,
+    pub eco_power_efficiency: &'static str,
+    pub eco_energy_saver: &'static str,
+    pub eco_lower_refresh: &'static str,
+    pub eco_end_when_plugged: &'static str,
+    pub eco_reopen_on_exit: &'static str,
+    pub eco_on_battery: &'static str,
+    pub eco_waiting_unplug: &'static str,
+    pub eco_manual: &'static str,
+    pub energy_saver: &'static str,
+    pub saver_on: &'static str,
+    pub saver_only_on_battery: &'static str,
+    pub could_not_set_efficiency: &'static str,
+    pub brightness: &'static str,
+    pub brightness_hint: &'static str,
+    pub could_not_change: &'static str,
+    pub restored: &'static str,
+    pub lenovo_select_battery: &'static str,
+    pub step_screen: &'static str,
+
+    pub drivers: &'static str,
+    pub drivers_subtitle: &'static str,
+    pub drivers_intro: &'static str,
+    pub check_drivers: &'static str,
+    pub check_again: &'static str,
+    pub checking_graphics: &'static str,
+    pub checking_windows_update: &'static str,
+    pub installing_drivers: &'static str,
+    pub downloading_installer: &'static str,
+    pub graphics_section: &'static str,
+    pub windows_update_section: &'static str,
+    pub tag_up_to_date: &'static str,
+    pub download_and_install: &'static str,
+    pub open_vendor_page: &'static str,
+    pub no_driver_updates: &'static str,
+    pub no_graphics_card: &'static str,
+    pub restore_point: &'static str,
+    pub install_selected: &'static str,
+    pub tag_firmware: &'static str,
+    pub firmware_hint: &'static str,
+    pub tag_installed: &'static str,
+    pub restart_needed: &'static str,
+    pub restore_point_failed: &'static str,
+    pub permission_denied_drivers: &'static str,
+    pub installer_started: &'static str,
+    pub installer_not_signed: &'static str,
+    pub installer_not_started: &'static str,
 }
 
 impl Texts {
@@ -246,10 +299,104 @@ impl Texts {
         }
     }
 
-    pub fn window_closes_in(&self, seconds: u64) -> String {
+    pub fn window_closes_in(&self, seconds: u64, mode: &str) -> String {
         match self.language {
-            Language::PtBr => format!("Esta janela fecha em {seconds} s para liberar memória. O Modo Jogo continua ativo."),
-            Language::En => format!("This window closes in {seconds} s to free memory. Game Mode stays on."),
+            Language::PtBr => format!("Esta janela fecha em {seconds} s para liberar memória. O {mode} continua ativo."),
+            Language::En => format!("This window closes in {seconds} s to free memory. {mode} stays on."),
+        }
+    }
+
+    pub fn other_mode_active(&self, mode: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("O {mode} está ativo. Encerre-o antes de usar este modo."),
+            Language::En => format!("{mode} is on. End it before using this mode."),
+        }
+    }
+
+    pub fn go_to(&self, page: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Ir para {page}"),
+            Language::En => format!("Go to {page}"),
+        }
+    }
+
+    pub fn can_lower_to(&self, hz: u32) -> String {
+        match self.language {
+            Language::PtBr => format!("pode baixar para {hz} Hz"),
+            Language::En => format!("can go down to {hz} Hz"),
+        }
+    }
+
+    pub fn dim_screen_to(&self, percent: u8) -> String {
+        match self.language {
+            Language::PtBr => format!("Reduzir o brilho para {percent}%"),
+            Language::En => format!("Lower the brightness to {percent}%"),
+        }
+    }
+
+    pub fn driver_packages(&self, count: usize) -> String {
+        match (self.language, count) {
+            (Language::PtBr, 1) => "1 pacote antigo".to_string(),
+            (Language::PtBr, n) => format!("{n} pacotes antigos"),
+            (Language::En, 1) => "1 old package".to_string(),
+            (Language::En, n) => format!("{n} old packages"),
+        }
+    }
+
+    pub fn driver_in_use(&self, driver: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("o Windows não removeu {driver}, que ainda está em uso"),
+            Language::En => format!("Windows did not remove {driver}, which is still in use"),
+        }
+    }
+
+    pub fn driver_version(&self, version: &str, date: &str) -> String {
+        format!("Driver {version}  ·  {date}")
+    }
+
+    pub fn version_available(&self, version: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("{version} disponível"),
+            Language::En => format!("{version} available"),
+        }
+    }
+
+    pub fn windows_update_failed(&self, error: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("Não foi possível consultar o Windows Update: {error}"),
+            Language::En => format!("Could not ask Windows Update: {error}"),
+        }
+    }
+
+    pub fn vendor_check_failed(&self, error: &str) -> String {
+        match self.language {
+            Language::PtBr => format!("não foi possível consultar o fabricante: {error}"),
+            Language::En => format!("could not check the vendor: {error}"),
+        }
+    }
+
+    pub fn installer_error(&self, error: &InstallerError) -> String {
+        match (self.language, error) {
+            (Language::PtBr, InstallerError::Download(e)) => format!("Não foi possível baixar o instalador: {e}"),
+            (Language::En, InstallerError::Download(e)) => format!("Could not download the installer: {e}"),
+            (_, InstallerError::NotSigned) => self.installer_not_signed.to_string(),
+            (_, InstallerError::NotStarted) => self.installer_not_started.to_string(),
+        }
+    }
+
+    pub fn drivers_installed(&self, count: usize) -> String {
+        match (self.language, count) {
+            (Language::PtBr, 1) => "1 driver instalado.".to_string(),
+            (Language::PtBr, n) => format!("{n} drivers instalados."),
+            (Language::En, 1) => "1 driver installed.".to_string(),
+            (Language::En, n) => format!("{n} drivers installed."),
+        }
+    }
+
+    pub fn driver_failed(&self, code: i32) -> String {
+        match self.language {
+            Language::PtBr => format!("falhou (código {code})"),
+            Language::En => format!("failed (code {code})"),
         }
     }
 
@@ -285,10 +432,16 @@ impl Texts {
             (Language::PtBr, Launcher::Steam) => "não foi possível abrir pela Steam",
             (Language::PtBr, Launcher::Epic) => "não foi possível abrir pela Epic Games",
             (Language::PtBr, Launcher::Gog) => "não foi possível abrir o executável do jogo da GOG",
+            (Language::PtBr, Launcher::Ea) => "não foi possível abrir o executável do jogo da EA",
+            (Language::PtBr, Launcher::BattleNet) => "não foi possível abrir pela Battle.net",
+            (Language::PtBr, Launcher::Xbox) => "não foi possível abrir pelo app Xbox",
             (Language::PtBr, Launcher::Custom) => "não foi possível abrir o executável escolhido",
             (Language::En, Launcher::Steam) => "could not be launched through Steam",
             (Language::En, Launcher::Epic) => "could not be launched through Epic Games",
             (Language::En, Launcher::Gog) => "could not start the GOG game executable",
+            (Language::En, Launcher::Ea) => "could not start the EA game executable",
+            (Language::En, Launcher::BattleNet) => "could not be launched through Battle.net",
+            (Language::En, Launcher::Xbox) => "could not be launched through the Xbox app",
             (Language::En, Launcher::Custom) => "could not start the chosen executable",
         }
     }
@@ -312,6 +465,9 @@ impl Texts {
             (_, Launcher::Steam) => "Steam",
             (_, Launcher::Epic) => "Epic Games",
             (_, Launcher::Gog) => "GOG",
+            (_, Launcher::Ea) => "EA app",
+            (_, Launcher::BattleNet) => "Battle.net",
+            (_, Launcher::Xbox) => "Xbox",
             (Language::PtBr, Launcher::Custom) => "executável",
             (Language::En, Launcher::Custom) => "executable",
         }
@@ -582,6 +738,7 @@ impl Texts {
         match kind {
             HistoryKind::GameMode => self.game_mode,
             HistoryKind::Cleanup => self.cleanup,
+            HistoryKind::EcoMode => self.eco_mode,
         }
     }
 
@@ -608,6 +765,8 @@ impl Texts {
             (Language::PtBr, Summary::GameMode { game: None, seconds }) => format!("Modo Jogo por {}", format_duration(*seconds)),
             (Language::En, Summary::GameMode { game: Some(game), seconds }) => format!("{game} for {}", format_duration(*seconds)),
             (Language::En, Summary::GameMode { game: None, seconds }) => format!("Game Mode for {}", format_duration(*seconds)),
+            (Language::PtBr, Summary::EcoMode { eco_seconds }) => format!("Modo Economia por {}", format_duration(*eco_seconds)),
+            (Language::En, Summary::EcoMode { eco_seconds }) => format!("Eco Mode for {}", format_duration(*eco_seconds)),
         }
     }
 
@@ -739,7 +898,7 @@ pub static PT_BR: Texts = Texts {
     permission_denied_clean: "Permissão negada: os itens do sistema não foram limpos.",
     admin_no_result: "o modo administrador não devolveu resultado",
 
-    history_subtitle: "Limpezas feitas e sessões de Modo Jogo.",
+    history_subtitle: "Limpezas feitas e sessões de Modo Jogo e Modo Economia.",
     history_empty: "Nada por aqui ainda.",
 
     settings_subtitle: "Aparência e preferências do app.",
@@ -777,6 +936,58 @@ pub static PT_BR: Texts = Texts {
     save_report_title: "Salvar relatório",
     text_filter: "Texto",
     open_file: "Abrir",
+
+    eco_mode: "Modo Economia",
+    eco_mode_subtitle: "Gasta menos energia para a bateria durar mais e devolve tudo ao encerrar.",
+    activate_eco: "Ativar Modo Economia",
+    deactivate_eco: "Encerrar Modo Economia",
+    eco_programs_hint: "A lista é a mesma do Modo Jogo. Para incluir outro programa, adicione por lá.",
+    eco_power_efficiency: "Ativar Melhor eficiência de energia",
+    eco_energy_saver: "Ligar a Economia de energia na bateria",
+    eco_lower_refresh: "Baixar a taxa de atualização da tela",
+    eco_end_when_plugged: "Encerrar ao conectar o carregador",
+    eco_reopen_on_exit: "Reabrir programas ao encerrar",
+    eco_on_battery: "Na bateria. O Modo Economia encerra sozinho quando o carregador for conectado.",
+    eco_waiting_unplug: "Carregador conectado. O Modo Economia passa a acompanhar a bateria quando ele for desconectado.",
+    eco_manual: "Encerre quando não precisar mais economizar.",
+    energy_saver: "Economia de energia",
+    saver_on: "ligada",
+    saver_only_on_battery: "o Windows só liga na bateria",
+    could_not_set_efficiency: "não foi possível ativar Melhor eficiência de energia",
+    brightness: "Brilho da tela",
+    brightness_hint: "ajuste o brilho em Win+A",
+    could_not_change: "não foi possível alterar",
+    restored: "voltou ao que era",
+    lenovo_select_battery: "para economizar mais, selecione Economia de bateria no Lenovo Vantage",
+    step_screen: "Ajustando a tela",
+
+    drivers: "Drivers",
+    drivers_subtitle: "Procura drivers mais novos no Windows Update e no fabricante da placa de vídeo. Nada é instalado sem você escolher.",
+    drivers_intro: "A busca consulta os servidores da Microsoft e o site do fabricante da placa de vídeo. Pode levar um minuto.",
+    check_drivers: "Procurar atualizações",
+    check_again: "Procurar de novo",
+    checking_graphics: "Verificando a placa de vídeo…",
+    checking_windows_update: "Consultando o Windows Update (pode levar um minuto)…",
+    installing_drivers: "Instalando (pede permissão de administrador e pode levar alguns minutos)…",
+    downloading_installer: "Baixando o instalador do fabricante…",
+    graphics_section: "Placa de vídeo",
+    windows_update_section: "Windows Update",
+    tag_up_to_date: "Em dia",
+    download_and_install: "Baixar e instalar",
+    open_vendor_page: "Abrir a página do fabricante",
+    no_driver_updates: "O Windows Update não tem driver mais novo para este computador.",
+    no_graphics_card: "Nenhuma placa de vídeo AMD, NVIDIA ou Intel encontrada.",
+    restore_point: "Criar um ponto de restauração antes",
+    install_selected: "Instalar selecionados",
+    tag_firmware: "Firmware",
+    firmware_hint: "Atualização de firmware: mantenha o carregador conectado e não desligue o computador durante a instalação.",
+    tag_installed: "Instalado",
+    restart_needed: "Reinicie o computador para concluir a instalação.",
+    restore_point_failed: "O Windows não criou o ponto de restauração, então nada foi instalado. Ative a Proteção do Sistema ou desmarque a opção.",
+    permission_denied_drivers: "Permissão negada: nada foi instalado.",
+    installer_started: "O instalador do fabricante foi aberto. Siga os passos dele.",
+    installer_not_signed: "O arquivo baixado não tem a assinatura do fabricante e foi apagado.",
+    installer_not_started: "Não foi possível abrir o instalador baixado.",
 };
 
 pub static EN: Texts = Texts {
@@ -889,7 +1100,7 @@ pub static EN: Texts = Texts {
     permission_denied_clean: "Permission denied: the system items were not cleaned.",
     admin_no_result: "the administrator mode returned no result",
 
-    history_subtitle: "Cleanups done and Game Mode sessions.",
+    history_subtitle: "Cleanups done and Game Mode and Eco Mode sessions.",
     history_empty: "Nothing here yet.",
 
     settings_subtitle: "Appearance and app preferences.",
@@ -927,6 +1138,58 @@ pub static EN: Texts = Texts {
     save_report_title: "Save report",
     text_filter: "Text",
     open_file: "Open",
+
+    eco_mode: "Eco Mode",
+    eco_mode_subtitle: "Spends less power so the battery lasts longer, and puts everything back when it ends.",
+    activate_eco: "Turn on Eco Mode",
+    deactivate_eco: "End Eco Mode",
+    eco_programs_hint: "The list is the same as in Game Mode. To include another program, add it there.",
+    eco_power_efficiency: "Turn on Best power efficiency",
+    eco_energy_saver: "Turn on Energy saver while on battery",
+    eco_lower_refresh: "Lower the screen refresh rate",
+    eco_end_when_plugged: "End when the charger is plugged in",
+    eco_reopen_on_exit: "Reopen programs when it ends",
+    eco_on_battery: "On battery. Eco Mode ends by itself when the charger is plugged in.",
+    eco_waiting_unplug: "Charger plugged in. Eco Mode starts following the battery once it is unplugged.",
+    eco_manual: "End it when you no longer need to save power.",
+    energy_saver: "Energy saver",
+    saver_on: "on",
+    saver_only_on_battery: "Windows only turns it on while on battery",
+    could_not_set_efficiency: "could not turn on Best power efficiency",
+    brightness: "Screen brightness",
+    brightness_hint: "set the brightness in Win+A",
+    could_not_change: "could not be changed",
+    restored: "back to what it was",
+    lenovo_select_battery: "to save more, select Battery saving in Lenovo Vantage",
+    step_screen: "Adjusting the screen",
+
+    drivers: "Drivers",
+    drivers_subtitle: "Looks for newer drivers in Windows Update and at the graphics card vendor. Nothing is installed until you choose.",
+    drivers_intro: "The search asks Microsoft's servers and the graphics card vendor's site. It can take a minute.",
+    check_drivers: "Check for updates",
+    check_again: "Check again",
+    checking_graphics: "Checking the graphics card…",
+    checking_windows_update: "Asking Windows Update (it can take a minute)…",
+    installing_drivers: "Installing (it asks for administrator permission and can take a few minutes)…",
+    downloading_installer: "Downloading the vendor's installer…",
+    graphics_section: "Graphics card",
+    windows_update_section: "Windows Update",
+    tag_up_to_date: "Up to date",
+    download_and_install: "Download and install",
+    open_vendor_page: "Open the vendor's page",
+    no_driver_updates: "Windows Update has no newer driver for this computer.",
+    no_graphics_card: "No AMD, NVIDIA or Intel graphics card found.",
+    restore_point: "Create a restore point first",
+    install_selected: "Install selected",
+    tag_firmware: "Firmware",
+    firmware_hint: "Firmware update: keep the charger plugged in and do not turn the computer off while it installs.",
+    tag_installed: "Installed",
+    restart_needed: "Restart the computer to finish the installation.",
+    restore_point_failed: "Windows could not create the restore point, so nothing was installed. Turn on System Protection or uncheck the option.",
+    permission_denied_drivers: "Permission denied: nothing was installed.",
+    installer_started: "The vendor's installer was opened. Follow its steps.",
+    installer_not_signed: "The downloaded file does not carry the vendor's signature and was deleted.",
+    installer_not_started: "The downloaded installer could not be opened.",
 };
 
 #[cfg(test)]

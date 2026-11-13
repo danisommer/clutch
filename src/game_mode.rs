@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::eco_mode;
 use crate::games::Game;
 use crate::i18n::Texts;
 use crate::storage::{self, ClosedProgram, Config, Force, HistoryKind, ProgramConfig, Session, Summary};
@@ -39,16 +40,16 @@ impl Item {
     pub fn new(label: impl Into<String>, value: impl Into<String>, status: Status, hint: Option<String>) -> Self {
         Item { label: label.into(), value: value.into(), status, hint }
     }
-    fn ok(label: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn ok(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self::new(label, value, Status::Ok, None)
     }
-    fn neutral(label: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn neutral(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self::new(label, value, Status::Neutral, None)
     }
-    fn warning(label: impl Into<String>, value: impl Into<String>, hint: impl Into<String>) -> Self {
+    pub fn warning(label: impl Into<String>, value: impl Into<String>, hint: impl Into<String>) -> Self {
         Self::new(label, value, Status::Warning, Some(hint.into()))
     }
-    fn with_hint(mut self, hint: impl Into<String>) -> Self {
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
     }
@@ -170,7 +171,7 @@ pub fn open_programs(config: &Config) -> Vec<String> {
         .collect()
 }
 
-fn wsl_item(t: &Texts) -> Item {
+pub fn wsl_item(t: &Texts) -> Item {
     match system::wsl_running() {
         true => Item::neutral(WSL, t.wsl_running),
         false => Item::ok(WSL, t.wsl_off),
@@ -199,7 +200,7 @@ fn power_item(t: &Texts, will_adjust: bool) -> Item {
 
 /// Thermal mode of Lenovo laptops, as set in Lenovo Vantage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LenovoMode {
+pub enum LenovoMode {
     Adaptive,
     Performance,
     BatterySaver,
@@ -207,7 +208,7 @@ enum LenovoMode {
 }
 
 impl LenovoMode {
-    fn label(self, t: &Texts) -> &'static str {
+    pub fn label(self, t: &Texts) -> &'static str {
         match self {
             LenovoMode::Adaptive => t.lenovo_adaptive,
             LenovoMode::Performance => t.lenovo_performance,
@@ -218,7 +219,7 @@ impl LenovoMode {
 }
 
 /// `None` when the computer does not have Lenovo's thermal service.
-fn lenovo_mode() -> Option<LenovoMode> {
+pub fn lenovo_mode() -> Option<LenovoMode> {
     if !system::registry_key_exists(true, LENOVO_KEY) {
         return None;
     }
@@ -304,7 +305,8 @@ pub struct Activation {
     pub session: Session,
 }
 
-fn shutdown_wsl_if_idle(t: &Texts, items: &mut Vec<Item>) {
+/// Shuts WSL down unless some program is using it, and reports what happened.
+pub fn shutdown_wsl_if_idle(t: &Texts, items: &mut Vec<Item>) {
     if !system::wsl_running() {
         items.push(Item::ok(WSL, t.wsl_off));
         return;
@@ -365,12 +367,13 @@ pub fn activate(config: &Config, game: Option<&Game>, t: &Texts, progress: &dyn 
         closed_programs: closed.iter().filter(|c| c.closed() && c.had_window).map(|c| c.record.clone()).collect(),
         game: game.map(Game::chosen),
         game_folder: game.map(|g| g.install_dir.to_string_lossy().to_string()),
+        eco: None,
     };
     let _ = storage::save_session(&session);
     Activation { items, session }
 }
 
-/// Restores the previous power mode, reopens the closed programs and records the session in the history.
+/// Ends a session of either mode: restores what it changed, reopens the closed programs and records it in the history.
 pub fn deactivate(session: &Session, reopen: bool, t: &Texts) -> Vec<Item> {
     let mut items = Vec::new();
     if let Some(previous) = session.previous_power_mode.as_deref().and_then(system::guid_from_str) {
@@ -378,6 +381,9 @@ pub fn deactivate(session: &Session, reopen: bool, t: &Texts) -> Vec<Item> {
             true => Item::ok(t.power_mode, t.power_back_to(t.power_mode_name(system::power_mode(&previous)))),
             false => Item::warning(t.power_mode, t.could_not_restore, t.power_settings_hint),
         });
+    }
+    if let Some(eco) = &session.eco {
+        items.extend(eco_mode::restore(eco, t));
     }
     if reopen {
         for program in &session.closed_programs {
@@ -388,11 +394,15 @@ pub fn deactivate(session: &Session, reopen: bool, t: &Texts) -> Vec<Item> {
             });
         }
     }
-    if lenovo_mode() == Some(LenovoMode::Performance) {
-        items.push(Item::neutral(t.lenovo_mode, LenovoMode::Performance.label(t)).with_hint(t.lenovo_back_to_adaptive));
-    }
     let seconds = storage::now_epoch().saturating_sub(session.started_at);
-    storage::add_history(HistoryKind::GameMode, 0, Summary::GameMode { game: session.game.as_ref().map(|g| g.name.clone()), seconds });
+    let (left_on, kind, summary) = match session.eco {
+        Some(_) => (LenovoMode::BatterySaver, HistoryKind::EcoMode, Summary::EcoMode { eco_seconds: seconds }),
+        None => (LenovoMode::Performance, HistoryKind::GameMode, Summary::GameMode { game: session.game.as_ref().map(|g| g.name.clone()), seconds }),
+    };
+    if lenovo_mode() == Some(left_on) {
+        items.push(Item::neutral(t.lenovo_mode, left_on.label(t)).with_hint(t.lenovo_back_to_adaptive));
+    }
+    storage::add_history(kind, 0, summary);
     storage::delete_session();
     items
 }
@@ -411,7 +421,7 @@ pub fn game_running(folder: &Path) -> bool {
 pub fn programs_to_add(config: &Config) -> Vec<(String, String)> {
     let ignore = [
         "explorer", "ApplicationFrameHost", "SystemSettings", "TextInputHost", "ShellExperienceHost",
-        "SearchHost", "StartMenuExperienceHost", "LockApp", "modo-jogo-limpeza", "ModoJogoLimpeza",
+        "SearchHost", "StartMenuExperienceHost", "LockApp", crate::APP_NAME,
     ];
     let all = system::processes();
     let exclude = system::self_and_ancestors(&all);

@@ -2,7 +2,7 @@
 //!
 //! The `.res` file is written here, so no C preprocessor is needed. MSVC links it directly; the GNU
 //! toolchain needs `windres` (from `WINDRES` or `PATH`) to turn it into an object. When that fails the
-//! build continues with a warning, unless `MJL_REQUIRE_RESOURCES` is set, as in the release workflow.
+//! build continues with a warning, unless `CLUTCH_REQUIRE_RESOURCES` is set, as in the release workflow.
 
 use std::env;
 use std::fs;
@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const ICON: &str = "assets/icon.ico";
-const PRODUCT: &str = "Modo Jogo e Limpeza";
-const INTERNAL_NAME: &str = "ModoJogoLimpeza";
-const ORIGINAL_FILENAME: &str = "ModoJogoLimpeza.exe";
+const PRODUCT: &str = "Clutch";
+const INTERNAL_NAME: &str = "Clutch";
+const ORIGINAL_FILENAME: &str = "Clutch.exe";
 const LANGUAGE: u16 = 0x0409;
 const CODE_PAGE: u16 = 1200;
 const RT_ICON: u16 = 3;
@@ -23,11 +23,11 @@ const MEMORY_FLAGS: u16 = 0x1030;
 fn main() {
     println!("cargo:rerun-if-changed={ICON}");
     println!("cargo:rerun-if-env-changed=WINDRES");
-    println!("cargo:rerun-if-env-changed=MJL_REQUIRE_RESOURCES");
+    println!("cargo:rerun-if-env-changed=CLUTCH_REQUIRE_RESOURCES");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
-    match (embed(), env::var_os("MJL_REQUIRE_RESOURCES").is_some()) {
+    match (embed(), env::var_os("CLUTCH_REQUIRE_RESOURCES").is_some()) {
         (Ok(()), _) => {}
         (Err(reason), true) => panic!("could not embed the Windows resources: {reason}"),
         (Err(reason), false) => println!("cargo:warning=built without the embedded icon and version info: {reason}"),

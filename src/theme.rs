@@ -331,16 +331,32 @@ pub fn loading(ui: &mut Ui, message: &str) {
     });
 }
 
-/// 32×32 window icon: a red square with a white bar.
+/// The brand mark on a 32-unit grid: a full bar over a half bar, each as `[x, y, width, height]`.
+const MARK_GRID: u32 = 32;
+const MARK_BARS: [[u32; 4]; 2] = [[8, 10, 16, 4], [8, 18, 8, 4]];
+
+/// The brand mark, `size` points wide: the two white bars on the accent square.
+pub fn mark(ui: &mut Ui, size: f32) {
+    let p = palette(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let unit = size / MARK_GRID as f32;
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::ZERO, p.accent);
+    for [x, y, width, height] in MARK_BARS {
+        let bar = Rect::from_min_size(rect.min + Vec2::new(x as f32, y as f32) * unit, Vec2::new(width as f32, height as f32) * unit);
+        painter.rect_filled(bar, CornerRadius::ZERO, p.on_accent);
+    }
+}
+
+/// 32×32 window icon: the brand mark.
 pub fn icon() -> egui::IconData {
-    let side = 32u32;
-    let mut rgba = Vec::with_capacity((side * side * 4) as usize);
-    for y in 0..side {
-        for x in 0..side {
-            let bar = (8..=23).contains(&x) && (14..=17).contains(&y);
+    let mut rgba = Vec::with_capacity((MARK_GRID * MARK_GRID * 4) as usize);
+    for y in 0..MARK_GRID {
+        for x in 0..MARK_GRID {
+            let bar = MARK_BARS.iter().any(|&[left, top, width, height]| (left..left + width).contains(&x) && (top..top + height).contains(&y));
             let (r, g, b) = if bar { (255, 255, 255) } else { (227, 0, 27) };
             rgba.extend_from_slice(&[r, g, b, 255]);
         }
     }
-    egui::IconData { rgba, width: side, height: side }
+    egui::IconData { rgba, width: MARK_GRID, height: MARK_GRID }
 }

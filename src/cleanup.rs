@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::{LocalizedText, Texts};
-use crate::{steam, storage, system};
+use crate::{drivers, steam, storage, system};
 
 const CATALOG: &str = include_str!("../categories.json");
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
@@ -137,6 +137,7 @@ pub enum Mode {
     DeliveryOptimization,
     ComponentStore,
     RecycleBin,
+    DriverStore,
 }
 
 /// The catalog embedded in the executable. The elevated helper only ever uses this one.
@@ -467,7 +468,7 @@ impl Rules {
         if let Some(local) = env_path("LOCALAPPDATA") {
             protected.push(local.join("wsl"));
             protected.push(local.join("Packages"));
-            protected.push(local.join(r"Programs\ModoJogoLimpeza"));
+            protected.push(local.join("Programs").join(crate::APP_NAME));
         }
         protected.push(storage::data_dir());
         if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
@@ -504,6 +505,7 @@ enum Operation {
     DeliveryOptimization(PathBuf),
     ComponentStore,
     RecycleBin,
+    DriverPackage(drivers::Package),
 }
 
 fn file_name_of(path: &Path) -> String {
@@ -592,11 +594,13 @@ enum Detail {
     Sessions(usize),
     StaleExtensions(usize),
     SteamLeftover { name: String, drive: String, bytes: u64 },
+    DriverPackages(usize),
 }
 
 impl Detail {
     fn describe(&self, t: &Texts) -> String {
         match self {
+            Detail::DriverPackages(count) => t.driver_packages(*count),
             Detail::NotInstalled(program) => program.clone(),
             Detail::Sessions(count) => t.sessions(*count),
             Detail::StaleExtensions(count) => t.stale_extensions(*count),
@@ -667,11 +671,24 @@ fn operations(target: &Target, rules: &Rules) -> (Vec<Operation>, Vec<Detail>) {
         Mode::DeliveryOptimization => (valid_paths(rules, paths(), false).into_iter().map(Operation::DeliveryOptimization).collect(), Vec::new()),
         Mode::ComponentStore => (vec![Operation::ComponentStore], Vec::new()),
         Mode::RecycleBin => (vec![Operation::RecycleBin], Vec::new()),
+        Mode::DriverStore => {
+            let packages = drivers::superseded_packages();
+            let details = match packages.len() {
+                0 => Vec::new(),
+                n => vec![Detail::DriverPackages(n)],
+            };
+            (packages.into_iter().map(Operation::DriverPackage).collect(), details)
+        }
     }
+}
+
+fn driver_package_size(package: &drivers::Package) -> Tally {
+    drivers::package_folder(package).map(|folder| sweep(&folder, 0, &[], false, false)).unwrap_or_default()
 }
 
 fn measure(operation: &Operation) -> Option<Tally> {
     match operation {
+        Operation::DriverPackage(package) => Some(driver_package_size(package)),
         Operation::Contents { path, age_hours, exclude } => Some(sweep(path, *age_hours, exclude, false, false)),
         Operation::Remove(p) | Operation::WindowsUpdate(p) | Operation::DeliveryOptimization(p) => Some(sweep(p, 0, &[], false, false)),
         Operation::ComponentStore => None,
@@ -717,6 +734,13 @@ fn execute(operation: &Operation, recycle_removals: bool, texts: &Texts) -> Resu
             let after = system::free_space("C:\\").unwrap_or(0);
             Ok(Tally { bytes: after.saturating_sub(before), ..Default::default() })
         }
+        Operation::DriverPackage(package) => {
+            let size = driver_package_size(package);
+            match drivers::delete_package(package) {
+                true => Ok(Tally { bytes: size.bytes, files: size.files, ..Default::default() }),
+                false => Err(texts.driver_in_use(&package.original_name)),
+            }
+        }
         Operation::RecycleBin => match system::recycle_bin_size() {
             0 => Ok(Tally::default()),
             size => {
@@ -739,6 +763,7 @@ fn applies(target: &Target, installed: &[String]) -> bool {
 fn admin_target_present(target: &Target) -> bool {
     match target.mode {
         Mode::ComponentStore | Mode::WindowsUpdate | Mode::DeliveryOptimization => true,
+        Mode::DriverStore => !drivers::superseded_packages().is_empty(),
         _ => !expand(&target.path).is_empty(),
     }
 }
@@ -911,7 +936,7 @@ mod tests {
     }
 
     fn test_folder(name: &str) -> PathBuf {
-        let base = std::env::temp_dir().join(format!("mjl-test-{name}-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("clutch-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         base

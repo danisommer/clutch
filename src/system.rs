@@ -15,12 +15,13 @@ use windows_sys::Win32::Devices::Display::{
     QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_CANCELLED, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM,
+    CloseHandle, ERROR_CANCELLED, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LocalFree,
     SYSTEMTIME,
 };
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Graphics::Gdi::{
-    DEVMODEW, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS, EnumDisplayDevicesW, EnumDisplaySettingsW,
+    CDS_UPDATEREGISTRY, ChangeDisplaySettingsExW, DEVMODEW, DISP_CHANGE_SUCCESSFUL, DISPLAY_DEVICEW, DM_DISPLAYFREQUENCY,
+    ENUM_CURRENT_SETTINGS, EnumDisplayDevicesW, EnumDisplaySettingsW,
 };
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
@@ -32,7 +33,10 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+use windows_sys::Win32::System::Power::{
+    GetSystemPowerStatus, PowerGetActiveScheme, PowerReadDCValueIndex, PowerSetActiveScheme, PowerWriteDCValueIndex,
+    SYSTEM_POWER_STATUS,
+};
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfigW, CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW,
@@ -334,6 +338,57 @@ pub fn on_ac_power() -> Option<bool> {
     Some(status.ACLineStatus == 1)
 }
 
+const ENERGY_SAVER_SETTINGS: GUID = GUID::from_u128(0xde830923_a562_41af_a086_e3a2c6bad2da);
+const ENERGY_SAVER_THRESHOLD: GUID = GUID::from_u128(0xe69653ca_cf7f_4f05_aa73_cb833fa90ad4);
+
+fn active_power_plan() -> Option<GUID> {
+    let mut plan: *mut GUID = std::ptr::null_mut();
+    if unsafe { PowerGetActiveScheme(std::ptr::null_mut(), &mut plan) } != 0 || plan.is_null() {
+        return None;
+    }
+    let guid = unsafe { *plan };
+    unsafe { LocalFree(plan as *mut c_void) };
+    Some(guid)
+}
+
+/// Whether Windows Energy Saver is on right now.
+pub fn energy_saver_on() -> bool {
+    let mut status: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
+    unsafe { GetSystemPowerStatus(&mut status) != 0 && status.SystemStatusFlag == 1 }
+}
+
+/// Battery level, in percent, below which Windows turns Energy Saver on while on battery; 100 means always.
+pub fn saver_threshold() -> Option<u32> {
+    let plan = active_power_plan()?;
+    let mut level = 0u32;
+    let read = unsafe { PowerReadDCValueIndex(std::ptr::null_mut(), &plan, &ENERGY_SAVER_SETTINGS, &ENERGY_SAVER_THRESHOLD, &mut level) } == 0;
+    read.then_some(level)
+}
+
+/// Changes the Energy Saver battery level in the active power plan and applies the plan again so it takes effect.
+pub fn set_saver_threshold(level: u32) -> bool {
+    let Some(plan) = active_power_plan() else { return false };
+    unsafe {
+        PowerWriteDCValueIndex(std::ptr::null_mut(), &plan, &ENERGY_SAVER_SETTINGS, &ENERGY_SAVER_THRESHOLD, level) == 0
+            && PowerSetActiveScheme(std::ptr::null_mut(), &plan) == 0
+    }
+}
+
+/// Brightness of the built-in screen, in percent; `None` when no screen reports it, as on desktops.
+pub fn brightness() -> Option<u8> {
+    let command = "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness | Select-Object -First 1).CurrentBrightness";
+    let output = run_hidden("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", command]).ok()?;
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+/// Sets the brightness of the built-in screen, in percent.
+pub fn set_brightness(percent: u8) -> bool {
+    let command = format!(
+        "Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods | Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{ Timeout = [uint32]0; Brightness = [byte]{percent} }} -ErrorAction Stop | Out-Null"
+    );
+    run_hidden("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", &command]).is_ok_and(|o| o.status.success())
+}
+
 pub fn available_memory() -> u64 {
     let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
     status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
@@ -353,25 +408,30 @@ pub fn local_time() -> SYSTEMTIME {
     t
 }
 
+/// An active screen. `device` is its Windows display device name and `rates` the refresh rates it offers at the current resolution, lowest first.
 #[derive(Clone, Debug)]
 pub struct Screen {
     pub name: String,
+    pub device: String,
     pub internal: bool,
     pub primary: bool,
     pub width: u32,
     pub height: u32,
     pub hz: u32,
     pub max_hz: u32,
+    pub rates: Vec<u32>,
 }
 
-fn screen_modes(gdi_name: &str) -> Option<(u32, u32, u32, u32)> {
+fn current_mode(device: &[u16]) -> Option<DEVMODEW> {
+    let mut mode: DEVMODEW = unsafe { std::mem::zeroed() };
+    mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+    (unsafe { EnumDisplaySettingsW(device.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode) } != 0).then_some(mode)
+}
+
+fn screen_modes(gdi_name: &str) -> Option<(u32, u32, u32, Vec<u32>)> {
     let name = wide(gdi_name);
-    let mut current: DEVMODEW = unsafe { std::mem::zeroed() };
-    current.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-    if unsafe { EnumDisplaySettingsW(name.as_ptr(), ENUM_CURRENT_SETTINGS, &mut current) } == 0 {
-        return None;
-    }
-    let mut max_hz = current.dmDisplayFrequency;
+    let current = current_mode(&name)?;
+    let mut rates = vec![current.dmDisplayFrequency];
     let mut index = 0u32;
     loop {
         let mut mode: DEVMODEW = unsafe { std::mem::zeroed() };
@@ -380,11 +440,23 @@ fn screen_modes(gdi_name: &str) -> Option<(u32, u32, u32, u32)> {
             break;
         }
         if mode.dmPelsWidth == current.dmPelsWidth && mode.dmPelsHeight == current.dmPelsHeight {
-            max_hz = max_hz.max(mode.dmDisplayFrequency);
+            rates.push(mode.dmDisplayFrequency);
         }
         index += 1;
     }
-    Some((current.dmPelsWidth, current.dmPelsHeight, current.dmDisplayFrequency, max_hz))
+    rates.sort_unstable();
+    rates.dedup();
+    Some((current.dmPelsWidth, current.dmPelsHeight, current.dmDisplayFrequency, rates))
+}
+
+/// Changes only the refresh rate of a screen, the same way Windows Settings does.
+pub fn set_refresh_rate(device: &str, hz: u32) -> bool {
+    let name = wide(device);
+    let Some(mut mode) = current_mode(&name) else { return false };
+    mode.dmDisplayFrequency = hz;
+    mode.dmFields = DM_DISPLAYFREQUENCY;
+    let result = unsafe { ChangeDisplaySettingsExW(name.as_ptr(), &mode, std::ptr::null_mut(), CDS_UPDATEREGISTRY, std::ptr::null()) };
+    result == DISP_CHANGE_SUCCESSFUL
 }
 
 fn primary_screens() -> HashSet<String> {
@@ -439,16 +511,18 @@ pub fn screens() -> Vec<Screen> {
             unsafe { DisplayConfigGetDeviceInfo(&mut source.header) };
 
             let gdi_name = from_wide(&source.viewGdiDeviceName);
-            let (width, height, hz, max_hz) = screen_modes(&gdi_name)?;
+            let (width, height, hz, rates) = screen_modes(&gdi_name)?;
             let technology = path.targetInfo.outputTechnology as u32;
             Some(Screen {
                 name: from_wide(&target.monitorFriendlyDeviceName),
                 internal: matches!(technology, 11 | 13 | 0x8000_0000),
                 primary: primary.contains(&gdi_name),
+                device: gdi_name,
                 width,
                 height,
                 hz,
-                max_hz,
+                max_hz: rates.last().copied().unwrap_or(hz),
+                rates,
             })
         })
         .collect()
@@ -507,9 +581,25 @@ pub fn registry_subkeys_32(path: &str) -> Vec<(String, HashMap<String, String>)>
         .collect()
 }
 
-/// Display names of installed programs, as listed in Settings > Apps.
-pub fn installed_programs() -> Vec<String> {
-    let mut names = Vec::new();
+/// Names of the subkeys of a registry key.
+pub fn registry_subkey_names(local_machine: bool, path: &str) -> Vec<String> {
+    registry_root(local_machine)
+        .open_subkey_with_flags(path, KEY_READ)
+        .map(|key| key.enum_keys().flatten().collect())
+        .unwrap_or_default()
+}
+
+/// A program listed in Settings > Apps, as its installer registered it. The location and the uninstall command may be empty.
+#[derive(Clone, Debug, Default)]
+pub struct InstalledProgram {
+    pub name: String,
+    pub install_location: String,
+    pub uninstall_string: String,
+}
+
+/// Programs listed in Settings > Apps, for all users and for the current one.
+pub fn uninstall_entries() -> Vec<InstalledProgram> {
+    let mut programs = Vec::new();
     let path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     let sources = [
         (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_64KEY),
@@ -518,14 +608,23 @@ pub fn installed_programs() -> Vec<String> {
     ];
     for (root, flags) in sources {
         if let Ok(key) = RegKey::predef(root).open_subkey_with_flags(path, flags) {
-            for sub in key.enum_keys().flatten() {
-                if let Ok(name) = key.open_subkey_with_flags(&sub, flags).and_then(|s| s.get_value::<String, _>("DisplayName")) {
-                    names.push(name);
+            for entry in key.enum_keys().flatten().filter_map(|sub| key.open_subkey_with_flags(&sub, flags).ok()) {
+                if let Ok(name) = entry.get_value::<String, _>("DisplayName") {
+                    programs.push(InstalledProgram {
+                        name,
+                        install_location: entry.get_value("InstallLocation").unwrap_or_default(),
+                        uninstall_string: entry.get_value("UninstallString").unwrap_or_default(),
+                    });
                 }
             }
         }
     }
-    names
+    programs
+}
+
+/// Display names of installed programs, as listed in Settings > Apps.
+pub fn installed_programs() -> Vec<String> {
+    uninstall_entries().into_iter().map(|program| program.name).collect()
 }
 
 pub fn known_folder(id: &GUID) -> Option<PathBuf> {
@@ -643,11 +742,11 @@ pub fn shell_open(target: &str) -> bool {
     result as isize > 32
 }
 
-/// Starts a program through the Windows shell with `dir` as its working folder, as games expect.
-pub fn shell_open_in(target: &str, dir: &Path) -> bool {
+/// Starts a program through the Windows shell with `args` and with `dir` as its working folder, as games expect.
+pub fn shell_open_in(target: &str, args: &str, dir: &Path) -> bool {
     let dir = wide(&dir.to_string_lossy());
     let result = unsafe {
-        ShellExecuteW(std::ptr::null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), std::ptr::null(), dir.as_ptr(), SW_SHOWNORMAL)
+        ShellExecuteW(std::ptr::null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), wide(args).as_ptr(), dir.as_ptr(), SW_SHOWNORMAL)
     };
     result as isize > 32
 }

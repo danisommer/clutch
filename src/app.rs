@@ -17,6 +17,8 @@ use eframe::egui::{
 use crate::admin;
 use crate::cleanup::{self, Analysis, Catalog, Category, CleanupResult, Group};
 use crate::debloat::{self, ItemState, Section};
+use crate::drivers::{self, GpuUpdate};
+use crate::eco_mode;
 use crate::game_mode::{self, Item, Status};
 use crate::i18n::{self, Texts};
 use crate::games::{self, Game};
@@ -25,26 +27,57 @@ use crate::storage::{
     ThemeChoice,
 };
 use crate::theme::{self, *};
-use crate::{system, watcher};
+use crate::watcher::{self, Watch};
+use crate::{APP_NAME, system};
 
 const NAV_WIDTH: f32 = 252.0;
 const TITLE_BAR_HEIGHT: f32 = 40.0;
 const AUTO_CLOSE_DELAY: Duration = Duration::from_secs(10);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(3);
-const BRAND_FIRST_LINE: &str = "Modo Jogo";
-const BRAND_SECOND_LINE: &str = "e Limpeza";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     GameMode,
+    EcoMode,
     Cleanup,
+    Drivers,
     Debloat,
     History,
     Settings,
 }
 
+/// The two modes that hold a session; only one session exists at a time.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum GamePhase {
+enum Mode {
+    Game,
+    Eco,
+}
+
+impl Mode {
+    fn of(eco: bool) -> Mode {
+        match eco {
+            true => Mode::Eco,
+            false => Mode::Game,
+        }
+    }
+
+    fn page(self) -> Page {
+        match self {
+            Mode::Game => Page::GameMode,
+            Mode::Eco => Page::EcoMode,
+        }
+    }
+
+    fn title(self, t: &Texts) -> &'static str {
+        match self {
+            Mode::Game => t.game_mode,
+            Mode::Eco => t.eco_mode,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionPhase {
     Ready,
     Activating,
     Active,
@@ -61,6 +94,15 @@ enum DebloatPhase {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum DriversPhase {
+    Idle,
+    Checking,
+    Listed,
+    Installing,
+    Downloading,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum CleanupPhase {
     Idle,
     Analyzing,
@@ -72,12 +114,13 @@ enum CleanupPhase {
 
 enum Message {
     Overview { items: Vec<Item>, games: Vec<Game> },
+    EcoOverview(Vec<Item>),
     GamePicked(PathBuf),
     Candidates(Vec<(String, String)>),
     GameProgress(String),
     Activated(game_mode::Activation),
-    GameStarted,
-    GameExited,
+    WatchStarted,
+    WatchEnded,
     Deactivated(Vec<Item>),
     CleanupProgress(String),
     Analyzed(Vec<Analysis>),
@@ -87,10 +130,24 @@ enum Message {
     ReportSaved(Result<PathBuf, String>),
     DebloatAnalyzed(HashMap<String, ItemState>),
     DebloatDone { action: debloat::Action, ids: Vec<String>, outcomes: Vec<debloat::Outcome>, warning: Option<String> },
+    DriversStep(drivers::Step),
+    DriversChecked(drivers::Check),
+    DriversInstalled(Result<drivers::InstallReport, String>),
+    VendorInstaller(Result<(), drivers::InstallerError>),
+}
+
+enum DriversAction {
+    Check,
+    Install,
+    RunInstaller(String),
+    OpenPage(&'static str),
 }
 
 enum GameAction {
     Refresh,
+    RefreshEco,
+    ActivateEco,
+    GoTo(Page),
     PickGame,
     RemoveCustomGame(String),
     FindCandidates,
@@ -125,16 +182,19 @@ pub struct App {
     tx: Sender<Message>,
     rx: Receiver<Message>,
     free_space_c: Option<u64>,
-    game_phase: GamePhase,
+    mode: Mode,
+    phase: SessionPhase,
     overview_items: Vec<Item>,
     loading_overview: bool,
+    eco_items: Vec<Item>,
+    loading_eco: bool,
     games: Vec<Game>,
     candidates: Option<Vec<(String, String)>>,
     game_progress: String,
     session: Option<Session>,
     activation_items: Vec<Item>,
     deactivation_items: Vec<Item>,
-    game_running: bool,
+    watch_ongoing: bool,
     monitor: Option<Arc<AtomicBool>>,
     cleanup_phase: CleanupPhase,
     analyses: Vec<Analysis>,
@@ -153,6 +213,13 @@ pub struct App {
     debloat_selection: HashSet<String>,
     debloat_outcomes: Vec<debloat::Outcome>,
     debloat_warning: Option<String>,
+    drivers_phase: DriversPhase,
+    drivers_step: drivers::Step,
+    driver_check: Option<drivers::Check>,
+    driver_selection: HashSet<String>,
+    driver_restore_point: bool,
+    driver_report: Option<Result<drivers::InstallReport, String>>,
+    vendor_installer: Option<Result<(), drivers::InstallerError>>,
     _window_marker: Option<watcher::Marker>,
     close_at: Option<Instant>,
 }
@@ -163,24 +230,28 @@ impl App {
         theme::apply(&cc.egui_ctx, config.theme);
         let (tx, rx) = mpsc::channel();
         let session = storage::load_session();
+        let mode = Mode::of(session.as_ref().is_some_and(|s| s.eco.is_some()));
         let mut app = App {
-            page: Page::GameMode,
+            page: mode.page(),
             t: i18n::texts_for(config.language),
             config,
             catalog: cleanup::catalog(),
             tx,
             rx,
             free_space_c: system::free_space("C:\\"),
-            game_phase: if session.is_some() { GamePhase::Active } else { GamePhase::Ready },
+            mode,
+            phase: if session.is_some() { SessionPhase::Active } else { SessionPhase::Ready },
             overview_items: Vec::new(),
             loading_overview: false,
+            eco_items: Vec::new(),
+            loading_eco: false,
             games: Vec::new(),
             candidates: None,
             game_progress: String::new(),
             session,
             activation_items: Vec::new(),
             deactivation_items: Vec::new(),
-            game_running: false,
+            watch_ongoing: false,
             monitor: None,
             cleanup_phase: CleanupPhase::Idle,
             analyses: Vec::new(),
@@ -199,21 +270,45 @@ impl App {
             debloat_selection: HashSet::new(),
             debloat_outcomes: Vec::new(),
             debloat_warning: None,
+            drivers_phase: DriversPhase::Idle,
+            drivers_step: drivers::Step::Graphics,
+            driver_check: None,
+            driver_selection: HashSet::new(),
+            driver_restore_point: true,
+            driver_report: None,
+            vendor_installer: None,
             _window_marker: watcher::mark_window(),
             close_at: None,
         };
         app.refresh_overview(&cc.egui_ctx);
         if app.session.is_none() {
-            if let Some(items) = storage::take_last_summary::<Vec<Item>>() {
-                app.deactivation_items = items;
-                app.game_phase = GamePhase::Finished;
+            if let Some(summary) = storage::take_last_summary::<Vec<Item>>() {
+                app.show_summary(summary);
+                app.page = app.mode.page();
             }
         }
-        if let Some(folder) = app.session.as_ref().and_then(|s| s.game_folder.clone()) {
+        if let Some(watch) = app.session.as_ref().and_then(Watch::of) {
             watcher::start();
-            app.start_monitor(&cc.egui_ctx, PathBuf::from(folder));
+            app.start_monitor(&cc.egui_ctx, watch);
         }
         app
+    }
+
+    /// Shows what the watcher restored when it ended a session.
+    fn show_summary(&mut self, summary: storage::LastSummary<Vec<Item>>) {
+        self.mode = Mode::of(summary.eco);
+        self.deactivation_items = summary.items;
+        self.session = None;
+        self.phase = SessionPhase::Finished;
+    }
+
+    fn refresh_eco(&mut self, ctx: &egui::Context) {
+        self.loading_eco = true;
+        let config = self.config.clone();
+        let t = self.t;
+        self.spawn_task(ctx, move |tx, _| {
+            let _ = tx.send(Message::EcoOverview(eco_mode::overview(&config, t)));
+        });
     }
 
     fn spawn_task(&self, ctx: &egui::Context, task: impl FnOnce(&Sender<Message>, &egui::Context) + Send + 'static) {
@@ -269,25 +364,25 @@ impl App {
         self.refresh_overview(ctx);
     }
 
-    /// Follows the game while the window is open, so the page can show whether it is running.
-    fn start_monitor(&mut self, ctx: &egui::Context, folder: PathBuf) {
+    /// Follows the game or the charger while the window is open, so the page can show how the session is going.
+    fn start_monitor(&mut self, ctx: &egui::Context, watch: Watch) {
         let cancel = Arc::new(AtomicBool::new(false));
         self.monitor = Some(cancel.clone());
         self.spawn_task(ctx, move |tx, ctx| {
             let mut seen = false;
             let mut misses = 0;
             while !cancel.load(Ordering::Relaxed) {
-                match (game_mode::game_running(&folder), seen) {
+                match (watch.ongoing(), seen) {
                     (true, false) => {
                         seen = true;
-                        let _ = tx.send(Message::GameStarted);
+                        let _ = tx.send(Message::WatchStarted);
                         ctx.request_repaint();
                     }
                     (true, true) => misses = 0,
                     (false, true) => {
                         misses += 1;
                         if misses >= 2 {
-                            let _ = tx.send(Message::GameExited);
+                            let _ = tx.send(Message::WatchEnded);
                             return;
                         }
                     }
@@ -304,8 +399,24 @@ impl App {
         }
     }
 
+    fn activate_eco(&mut self, ctx: &egui::Context) {
+        self.mode = Mode::Eco;
+        self.phase = SessionPhase::Activating;
+        self.game_progress = self.t.step_preparing.into();
+        let config = self.config.clone();
+        let t = self.t;
+        self.spawn_task(ctx, move |tx, ctx| {
+            let progress = |step: &str| {
+                let _ = tx.send(Message::GameProgress(step.into()));
+                ctx.request_repaint();
+            };
+            let _ = tx.send(Message::Activated(eco_mode::activate(&config, t, &progress)));
+        });
+    }
+
     fn activate(&mut self, ctx: &egui::Context) {
-        self.game_phase = GamePhase::Activating;
+        self.mode = Mode::Game;
+        self.phase = SessionPhase::Activating;
         self.game_progress = self.t.step_preparing.into();
         let config = self.config.effective();
         let t = self.t;
@@ -323,12 +434,12 @@ impl App {
     fn deactivate(&mut self, ctx: &egui::Context) {
         self.stop_monitor();
         self.close_at = None;
-        self.game_phase = GamePhase::Deactivating;
-        let reopen = self.config.reopen_on_exit;
+        self.phase = SessionPhase::Deactivating;
+        let config = self.config.clone();
         let t = self.t;
         self.spawn_task(ctx, move |tx, _| {
             let items = match storage::claim_session() {
-                Some(session) => game_mode::deactivate(&session, reopen, t),
+                Some(session) => game_mode::deactivate(&session, config.reopens(&session), t),
                 None => wait_for_watcher_summary(),
             };
             let _ = tx.send(Message::Deactivated(items));
@@ -442,35 +553,39 @@ impl App {
                     self.games = games;
                     self.loading_overview = false;
                 }
+                Message::EcoOverview(items) => {
+                    self.eco_items = items;
+                    self.loading_eco = false;
+                }
                 Message::Candidates(list) => self.candidates = Some(list),
                 Message::GamePicked(exe) => self.add_custom_game(ctx, exe),
                 Message::GameProgress(step) => self.game_progress = step,
                 Message::Activated(activation) => {
                     let has_warning = activation.items.iter().any(|i| i.status == Status::Warning);
                     self.activation_items = activation.items;
-                    let folder = activation.session.game_folder.clone();
+                    let watch = Watch::of(&activation.session);
                     self.session = Some(activation.session);
-                    self.game_phase = GamePhase::Active;
-                    self.game_running = false;
-                    if let Some(f) = folder {
+                    self.phase = SessionPhase::Active;
+                    self.watch_ongoing = false;
+                    if let Some(watch) = watch {
                         let watching = watcher::start();
-                        self.start_monitor(ctx, PathBuf::from(f));
+                        self.start_monitor(ctx, watch);
                         if watching && !has_warning {
                             self.close_at = Some(Instant::now() + AUTO_CLOSE_DELAY);
                         }
                     }
                 }
-                Message::GameStarted => self.game_running = true,
-                Message::GameExited => {
-                    self.game_running = false;
-                    if self.game_phase == GamePhase::Active && !watcher::is_running() {
+                Message::WatchStarted => self.watch_ongoing = true,
+                Message::WatchEnded => {
+                    self.watch_ongoing = false;
+                    if self.phase == SessionPhase::Active && !watcher::is_running() {
                         self.deactivate(ctx);
                     }
                 }
                 Message::Deactivated(items) => {
                     self.deactivation_items = items;
                     self.session = None;
-                    self.game_phase = GamePhase::Finished;
+                    self.phase = SessionPhase::Finished;
                     self.history = storage::load_history();
                 }
                 Message::CleanupProgress(name) => self.cleanup_progress = name,
@@ -518,6 +633,23 @@ impl App {
                     self.debloat_outcomes = outcomes;
                     self.debloat_warning = warning;
                     self.analyze_debloat(ctx);
+                }
+                Message::DriversStep(step) => self.drivers_step = step,
+                Message::DriversChecked(check) => {
+                    self.driver_selection.clear();
+                    self.driver_check = Some(check);
+                    self.drivers_phase = DriversPhase::Listed;
+                }
+                Message::DriversInstalled(result) => {
+                    if let Ok(report) = &result {
+                        self.driver_selection.retain(|id| !report.results.iter().any(|r| &r.id == id && r.succeeded()));
+                    }
+                    self.driver_report = Some(result);
+                    self.drivers_phase = DriversPhase::Listed;
+                }
+                Message::VendorInstaller(result) => {
+                    self.vendor_installer = Some(result);
+                    self.drivers_phase = DriversPhase::Listed;
                 }
                 Message::Cleaned { results, warning } => {
                     self.report_status = None;
@@ -577,27 +709,27 @@ impl App {
         let pal = palette(ui.ctx());
         let t = self.t;
         ui.add_space(14.0);
-        ui.label(text(BRAND_FIRST_LINE, semibold(24.0), pal.text));
-        ui.label(text(BRAND_SECOND_LINE, semibold(24.0), pal.text_faint));
+        ui.horizontal(|ui| {
+            mark(ui, 28.0);
+            ui.add_space(4.0);
+            ui.label(text(APP_NAME, semibold(24.0), pal.text));
+        });
         ui.add_space(16.0);
         let (bar, _) = ui.allocate_exact_size(Vec2::new(28.0, 4.0), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, pal.accent);
         ui.add_space(48.0);
         let pages = [
             (1, Page::GameMode, t.game_mode),
-            (2, Page::Cleanup, t.cleanup),
-            (3, Page::Debloat, t.debloat),
-            (4, Page::History, t.history),
-            (5, Page::Settings, t.settings),
+            (2, Page::EcoMode, t.eco_mode),
+            (3, Page::Cleanup, t.cleanup),
+            (4, Page::Drivers, t.drivers),
+            (5, Page::Debloat, t.debloat),
+            (6, Page::History, t.history),
+            (7, Page::Settings, t.settings),
         ];
         for (number, page, name) in pages {
             if nav_item(ui, number, name, self.page == page).clicked() {
-                self.page = page;
-                match page {
-                    Page::History => self.history = storage::load_history(),
-                    Page::Settings => self.refresh_custom_rules(),
-                    Page::GameMode | Page::Cleanup | Page::Debloat => {}
-                }
+                self.open_page(ui.ctx(), page);
             }
         }
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
@@ -610,25 +742,42 @@ impl App {
         });
     }
 
-    fn game_mode_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    /// Shows a page and loads what it needs.
+    fn open_page(&mut self, ctx: &egui::Context, page: Page) {
+        self.page = page;
+        match page {
+            Page::History => self.history = storage::load_history(),
+            Page::Settings => self.refresh_custom_rules(),
+            Page::EcoMode if self.phase == SessionPhase::Ready => self.refresh_eco(ctx),
+            Page::GameMode | Page::EcoMode | Page::Cleanup | Page::Drivers | Page::Debloat => {}
+        }
+    }
+
+    /// The page of Game Mode or Eco Mode. While the other mode holds the session, it only points there.
+    fn mode_page(&mut self, ui: &mut Ui, ctx: &egui::Context, own: Mode) {
         let t = self.t;
-        let action = match self.game_phase {
-            GamePhase::Ready => self.game_ready(ui),
-            GamePhase::Activating => {
-                heading(ui, t.game_mode, t.preparing_subtitle);
+        let action = match (self.phase, self.mode == own, own) {
+            (SessionPhase::Ready, _, Mode::Game) => self.game_ready(ui),
+            (SessionPhase::Ready, _, Mode::Eco) => self.eco_ready(ui),
+            (_, false, _) => self.other_mode_active(ui, own),
+            (SessionPhase::Activating, true, _) => {
+                heading(ui, own.title(t), t.preparing_subtitle);
                 loading(ui, &format!("{}…", self.game_progress));
                 None
             }
-            GamePhase::Active => self.game_active(ui),
-            GamePhase::Deactivating => {
-                heading(ui, t.game_mode, t.restoring_subtitle);
+            (SessionPhase::Active, true, _) => self.session_active(ui),
+            (SessionPhase::Deactivating, true, _) => {
+                heading(ui, own.title(t), t.restoring_subtitle);
                 loading(ui, t.reopening_programs);
                 None
             }
-            GamePhase::Finished => self.game_finished(ui),
+            (SessionPhase::Finished, true, _) => self.session_finished(ui),
         };
         match action {
             Some(GameAction::Refresh) => self.refresh_overview(ctx),
+            Some(GameAction::RefreshEco) => self.refresh_eco(ctx),
+            Some(GameAction::ActivateEco) => self.activate_eco(ctx),
+            Some(GameAction::GoTo(page)) => self.open_page(ctx, page),
             Some(GameAction::PickGame) => self.pick_game(ctx),
             Some(GameAction::RemoveCustomGame(exe)) => {
                 self.config.custom_games.retain(|g| g.exe != exe);
@@ -655,12 +804,112 @@ impl App {
             Some(GameAction::Deactivate) => self.deactivate(ctx),
             Some(GameAction::KeepOpen) => self.close_at = None,
             Some(GameAction::Back) => {
-                self.game_phase = GamePhase::Ready;
+                self.phase = SessionPhase::Ready;
                 self.free_space_c = system::free_space("C:\\");
-                self.refresh_overview(ctx);
+                match own {
+                    Mode::Game => self.refresh_overview(ctx),
+                    Mode::Eco => self.refresh_eco(ctx),
+                }
             }
             None => {}
         }
+    }
+
+    fn other_mode_active(&mut self, ui: &mut Ui, own: Mode) -> Option<GameAction> {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        let (title, subtitle) = match own {
+            Mode::Game => (t.game_mode, t.game_mode_subtitle),
+            Mode::Eco => (t.eco_mode, t.eco_mode_subtitle),
+        };
+        let active = self.mode.title(t);
+        heading(ui, title, subtitle);
+        ui.label(text(t.other_mode_active(active), regular(14.0), pal.text_muted));
+        ui.add_space(12.0);
+        link(ui, &t.go_to(active), pal.accent_text).clicked().then_some(GameAction::GoTo(self.mode.page()))
+    }
+
+    fn eco_ready(&mut self, ui: &mut Ui) -> Option<GameAction> {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        heading(ui, t.eco_mode, t.eco_mode_subtitle);
+        let mut action = None;
+        let width = ui.available_width();
+        let left = (width * 0.55).floor();
+        let right = width - left - 48.0;
+        let height = ui.available_height() - 80.0;
+        let mut changed = false;
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(left);
+                ui.horizontal(|ui| {
+                    section_label(ui, t.status_section);
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        if link(ui, t.refresh, pal.text_muted).clicked() {
+                            action = Some(GameAction::RefreshEco);
+                        }
+                    });
+                });
+                rule(ui);
+                egui::ScrollArea::vertical().id_salt("eco_overview").max_height(height).show(ui, |ui| {
+                    ui.set_width(left);
+                    match (self.loading_eco, self.eco_items.is_empty()) {
+                        (true, true) => {
+                            ui.add_space(12.0);
+                            loading(ui, t.checking);
+                        }
+                        _ => {
+                            for item in &self.eco_items {
+                                item_row(ui, item, 196.0);
+                            }
+                        }
+                    }
+                });
+            });
+            ui.add_space(48.0);
+            ui.vertical(|ui| {
+                ui.set_width(right);
+                egui::ScrollArea::vertical().id_salt("eco_options").max_height(height + 26.0).show(ui, |ui| {
+                    ui.set_width(right - 14.0);
+                    let eco = &mut self.config.eco;
+                    section_label(ui, t.close_programs_section);
+                    rule(ui);
+                    ui.add_space(8.0);
+                    for program in &self.config.programs {
+                        let mut closes = eco.close.contains(&program.name);
+                        if checkbox(ui, &mut closes, &program.name, true).changed() {
+                            eco.set_closes(&program.name, closes);
+                            changed = true;
+                        }
+                    }
+                    ui.add_space(4.0);
+                    ui.add(egui::Label::new(text(t.eco_programs_hint, regular(12.5), pal.text_muted)).wrap());
+                    ui.add_space(22.0);
+                    section_label(ui, t.system_section);
+                    rule(ui);
+                    ui.add_space(8.0);
+                    changed |= checkbox(ui, &mut eco.shutdown_wsl, t.shutdown_wsl, true).changed();
+                    changed |= checkbox(ui, &mut eco.power_efficiency, t.eco_power_efficiency, true).changed();
+                    changed |= checkbox(ui, &mut eco.energy_saver, t.eco_energy_saver, true).changed();
+                    changed |= checkbox(ui, &mut eco.lower_refresh_rate, t.eco_lower_refresh, true).changed();
+                    changed |= checkbox(ui, &mut eco.dim_screen, &t.dim_screen_to(eco_mode::DIMMED_BRIGHTNESS), true).changed();
+                    ui.add_space(22.0);
+                    section_label(ui, t.on_exit_section);
+                    rule(ui);
+                    ui.add_space(8.0);
+                    changed |= checkbox(ui, &mut eco.end_when_plugged_in, t.eco_end_when_plugged, true).changed();
+                    changed |= checkbox(ui, &mut eco.reopen_on_exit, t.eco_reopen_on_exit, true).changed();
+                });
+            });
+        });
+        if changed {
+            self.save_config();
+        }
+        ui.add_space(24.0);
+        if primary_button(ui, t.activate_eco, 240.0, !self.loading_eco).clicked() {
+            action = Some(GameAction::ActivateEco);
+        }
+        action
     }
 
     fn game_ready(&mut self, ui: &mut Ui) -> Option<GameAction> {
@@ -820,28 +1069,36 @@ impl App {
         action
     }
 
-    fn game_active(&mut self, ui: &mut Ui) -> Option<GameAction> {
+    fn session_active(&mut self, ui: &mut Ui) -> Option<GameAction> {
         let pal = palette(ui.ctx());
         let t = self.t;
         let mut action = None;
         let Some(session) = &self.session else { return Some(GameAction::Back) };
-        ui.label(text(t.game_mode, semibold(40.0), pal.text));
+        let (title, end_label) = match self.mode {
+            Mode::Game => (t.game_mode, t.deactivate),
+            Mode::Eco => (t.eco_mode, t.deactivate_eco),
+        };
+        ui.label(text(title, semibold(40.0), pal.text));
         ui.add_space(4.0);
         tag(ui, t.active_tag, pal.accent_text);
         ui.add_space(26.0);
         let elapsed = storage::now_epoch().saturating_sub(session.started_at);
         ui.label(text(storage::format_duration(elapsed), light(72.0), pal.text));
-        let status_line = match (&session.game, self.game_running) {
-            (Some(g), true) => t.game_running(&g.name),
-            (Some(g), false) => t.waiting_for_game(&g.name),
-            (None, _) => t.no_game_chosen.to_string(),
+        let ends_when_plugged_in = session.eco.as_ref().is_some_and(|eco| eco.end_when_plugged_in);
+        let status_line = match (self.mode, &session.game, self.watch_ongoing) {
+            (Mode::Game, Some(g), true) => t.game_running(&g.name),
+            (Mode::Game, Some(g), false) => t.waiting_for_game(&g.name),
+            (Mode::Game, None, _) => t.no_game_chosen.to_string(),
+            (Mode::Eco, _, true) => t.eco_on_battery.to_string(),
+            (Mode::Eco, _, false) if ends_when_plugged_in => t.eco_waiting_unplug.to_string(),
+            (Mode::Eco, _, false) => t.eco_manual.to_string(),
         };
         ui.label(text(status_line, regular(15.0), pal.text_muted));
         if let Some(deadline) = self.close_at {
             let remaining = deadline.saturating_duration_since(Instant::now()).as_secs() + 1;
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label(text(t.window_closes_in(remaining), regular(13.0), pal.text_muted));
+                ui.label(text(t.window_closes_in(remaining, title), regular(13.0), pal.text_muted));
                 if link(ui, t.keep_open, pal.accent_text).clicked() {
                     action = Some(GameAction::KeepOpen);
                 }
@@ -861,16 +1118,16 @@ impl App {
             }
         });
         ui.add_space(20.0);
-        if secondary_button(ui, t.deactivate, 240.0).clicked() {
+        if secondary_button(ui, end_label, 240.0).clicked() {
             action = Some(GameAction::Deactivate);
         }
         action
     }
 
-    fn game_finished(&mut self, ui: &mut Ui) -> Option<GameAction> {
+    fn session_finished(&mut self, ui: &mut Ui) -> Option<GameAction> {
         let pal = palette(ui.ctx());
         let t = self.t;
-        heading(ui, t.game_mode, t.finished_subtitle);
+        heading(ui, self.mode.title(t), t.finished_subtitle);
         section_label(ui, t.on_exit_section);
         rule(ui);
         if self.deactivation_items.is_empty() {
@@ -1227,6 +1484,186 @@ impl App {
         action
     }
 
+    fn check_drivers(&mut self, ctx: &egui::Context) {
+        self.drivers_phase = DriversPhase::Checking;
+        self.drivers_step = drivers::Step::Graphics;
+        self.driver_report = None;
+        self.vendor_installer = None;
+        self.spawn_task(ctx, move |tx, ctx| {
+            let progress = |step: drivers::Step| {
+                let _ = tx.send(Message::DriversStep(step));
+                ctx.request_repaint();
+            };
+            let _ = tx.send(Message::DriversChecked(drivers::check(&progress)));
+        });
+    }
+
+    /// Installs the checked Windows Update drivers through one elevated run.
+    fn install_drivers(&mut self, ctx: &egui::Context) {
+        self.drivers_phase = DriversPhase::Installing;
+        let t = self.t;
+        let ids: Vec<String> = self.driver_selection.iter().cloned().collect();
+        let restore_point = self.driver_restore_point;
+        self.spawn_task(ctx, move |tx, _| {
+            let result = match admin::install_drivers(&ids, restore_point) {
+                Ok(report) => report.map_err(|error| t.windows_update_failed(&error)),
+                Err(error) => Err(t.admin_error(error, t.permission_denied_drivers)),
+            };
+            let _ = tx.send(Message::DriversInstalled(result));
+        });
+    }
+
+    /// Downloads the graphics vendor's installer and starts it once its signature is confirmed.
+    fn run_vendor_installer(&mut self, ctx: &egui::Context, address: String) {
+        self.drivers_phase = DriversPhase::Downloading;
+        self.spawn_task(ctx, move |tx, _| {
+            let _ = tx.send(Message::VendorInstaller(drivers::run_amd_installer(&address, &admin::exchange_dir())));
+        });
+    }
+
+    fn drivers_page(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        heading(ui, t.drivers, t.drivers_subtitle);
+        let action = match self.drivers_phase {
+            DriversPhase::Idle => {
+                ui.add(egui::Label::new(text(t.drivers_intro, regular(14.0), pal.text_muted)).wrap());
+                ui.add_space(20.0);
+                primary_button(ui, t.check_drivers, 240.0, true).clicked().then_some(DriversAction::Check)
+            }
+            DriversPhase::Checking => {
+                loading(ui, match self.drivers_step {
+                    drivers::Step::Graphics => t.checking_graphics,
+                    drivers::Step::WindowsUpdate => t.checking_windows_update,
+                });
+                None
+            }
+            DriversPhase::Installing => {
+                loading(ui, t.installing_drivers);
+                None
+            }
+            DriversPhase::Downloading => {
+                loading(ui, t.downloading_installer);
+                None
+            }
+            DriversPhase::Listed => self.drivers_list(ui),
+        };
+        match action {
+            Some(DriversAction::Check) => self.check_drivers(ctx),
+            Some(DriversAction::Install) => self.install_drivers(ctx),
+            Some(DriversAction::RunInstaller(address)) => self.run_vendor_installer(ctx, address),
+            Some(DriversAction::OpenPage(address)) => {
+                system::shell_open(address);
+            }
+            None => {}
+        }
+    }
+
+    /// What the last installer download and the last installation left to say, each with whether it is a warning.
+    fn driver_messages(&self) -> Vec<(String, Status)> {
+        let t = self.t;
+        let mut messages = Vec::new();
+        match &self.vendor_installer {
+            Some(Ok(())) => messages.push((t.installer_started.to_string(), Status::Ok)),
+            Some(Err(error)) => messages.push((t.installer_error(error), Status::Warning)),
+            None => {}
+        }
+        match &self.driver_report {
+            Some(Err(error)) => messages.push((error.clone(), Status::Warning)),
+            Some(Ok(report)) => {
+                let installed = report.results.iter().filter(|r| r.succeeded()).count();
+                if report.restore_point == Some(false) {
+                    messages.push((t.restore_point_failed.to_string(), Status::Warning));
+                }
+                if installed > 0 {
+                    messages.push((t.drivers_installed(installed), Status::Ok));
+                }
+                if report.reboot {
+                    messages.push((t.restart_needed.to_string(), Status::Warning));
+                }
+            }
+            None => {}
+        }
+        messages
+    }
+
+    fn drivers_list(&mut self, ui: &mut Ui) -> Option<DriversAction> {
+        let pal = palette(ui.ctx());
+        let t = self.t;
+        let mut action = None;
+        let messages = self.driver_messages();
+        let Some(check) = &self.driver_check else { return Some(DriversAction::Check) };
+        let outcomes: &[drivers::Installed] = match &self.driver_report {
+            Some(Ok(report)) => &report.results,
+            _ => &[],
+        };
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                if link(ui, t.check_again, pal.text_muted).clicked() {
+                    action = Some(DriversAction::Check);
+                }
+            });
+        });
+        for (message, status) in &messages {
+            ui.add(egui::Label::new(text(message, semibold(13.0), status_color(pal, *status))).wrap());
+        }
+        ui.add_space(10.0);
+        let height = ui.available_height() - 104.0;
+        let width = ui.available_width();
+        egui::ScrollArea::vertical().id_salt("drivers").max_height(height).show(ui, |ui| {
+            ui.set_width(width);
+            section_label(ui, t.graphics_section);
+            rule(ui);
+            if check.gpus.is_empty() {
+                ui.add_space(10.0);
+                ui.label(text(t.no_graphics_card, regular(14.0), pal.text_muted));
+                ui.add_space(10.0);
+            }
+            for (gpu, update) in &check.gpus {
+                if let Some(a) = gpu_row(ui, t, gpu, update) {
+                    action = Some(a);
+                }
+            }
+            ui.add_space(22.0);
+            section_label(ui, t.windows_update_section);
+            rule(ui);
+            match &check.updates {
+                Err(error) => {
+                    ui.add_space(10.0);
+                    ui.add(egui::Label::new(text(t.windows_update_failed(error), semibold(13.0), pal.accent_text)).wrap());
+                }
+                Ok(updates) if updates.is_empty() => {
+                    ui.add_space(10.0);
+                    ui.label(text(t.no_driver_updates, regular(14.0), pal.text_muted));
+                }
+                Ok(updates) => {
+                    for update in updates {
+                        let outcome = outcomes.iter().find(|o| o.id == update.id);
+                        update_row(ui, t, update, outcome, &mut self.driver_selection);
+                    }
+                }
+            }
+            ui.add_space(22.0);
+        });
+        rule(ui);
+        ui.add_space(14.0);
+        let selected = self.driver_selection.len();
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                section_label(ui, t.selected);
+                ui.label(text(t.items_count(selected), semibold(24.0), pal.text));
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if primary_button(ui, t.install_selected, 240.0, selected > 0).clicked() {
+                    action = Some(DriversAction::Install);
+                }
+                ui.add_space(16.0);
+                checkbox(ui, &mut self.driver_restore_point, t.restore_point, true);
+            });
+        });
+        action
+    }
+
     fn history_page(&mut self, ui: &mut Ui) {
         let pal = palette(ui.ctx());
         let t = self.t;
@@ -1289,6 +1726,7 @@ impl App {
                 self.config.language = choice;
                 self.t = i18n::texts_for(choice);
                 self.save_config();
+                self.eco_items.clear();
                 self.refresh_overview(ctx);
             }
         }
@@ -1354,12 +1792,10 @@ impl App {
         if storage::session_active() {
             return;
         }
-        if let Some(items) = storage::take_last_summary::<Vec<Item>>() {
+        if let Some(summary) = storage::take_last_summary::<Vec<Item>>() {
             self.stop_monitor();
             self.close_at = None;
-            self.deactivation_items = items;
-            self.session = None;
-            self.game_phase = GamePhase::Finished;
+            self.show_summary(summary);
             self.history = storage::load_history();
         }
     }
@@ -1368,8 +1804,8 @@ impl App {
 /// Used when the watcher claimed the session first: waits up to 30 s for its summary.
 fn wait_for_watcher_summary() -> Vec<Item> {
     for _ in 0..60 {
-        if let Some(items) = storage::take_last_summary::<Vec<Item>>() {
-            return items;
+        if let Some(summary) = storage::take_last_summary::<Vec<Item>>() {
+            return summary.items;
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -1379,7 +1815,7 @@ fn wait_for_watcher_summary() -> Vec<Item> {
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.stop_monitor();
-        if storage::session_active() && self.session.as_ref().is_some_and(|s| s.game_folder.is_some()) {
+        if storage::session_active() && self.session.as_ref().is_some_and(|s| Watch::of(s).is_some()) {
             watcher::start();
         }
     }
@@ -1387,7 +1823,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let pal = palette(ctx);
         self.receive(ctx);
-        if self.game_phase == GamePhase::Active {
+        if self.phase == SessionPhase::Active {
             ctx.request_repaint_after(Duration::from_secs(1));
             self.follow_watcher();
             if self.close_at.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -1408,8 +1844,10 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(Frame::new().fill(pal.background).inner_margin(Margin { left: 48, right: 56, top: 4, bottom: 32 }))
             .show(ctx, |ui| match self.page {
-                Page::GameMode => self.game_mode_page(ui, ctx),
+                Page::GameMode => self.mode_page(ui, ctx, Mode::Game),
+                Page::EcoMode => self.mode_page(ui, ctx, Mode::Eco),
                 Page::Cleanup => self.cleanup_page(ui, ctx),
+                Page::Drivers => self.drivers_page(ui, ctx),
                 Page::Debloat => self.debloat_page(ui, ctx),
                 Page::History => self.history_page(ui),
                 Page::Settings => self.settings_page(ui, ctx),
@@ -1541,6 +1979,91 @@ fn debloat_row(ui: &mut Ui, t: &Texts, item: &debloat::Item, state: ItemState, s
     action
 }
 
+/// A graphics adapter with its driver and, on the right, what can be done about it.
+fn gpu_row(ui: &mut Ui, t: &Texts, gpu: &drivers::Gpu, update: &GpuUpdate) -> Option<DriversAction> {
+    let pal = palette(ui.ctx());
+    let mut action = None;
+    ui.add_space(12.0);
+    ui.horizontal_top(|ui| {
+        let text_width = ui.available_width() - 320.0;
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
+            ui.horizontal(|ui| {
+                ui.label(text(&gpu.name, semibold(14.5), pal.text));
+                if matches!(update, GpuUpdate::UpToDate) {
+                    tag(ui, t.tag_up_to_date, pal.text_muted);
+                }
+            });
+            let software = gpu.software_version.as_ref().map(|version| format!("  ·  AMD Software {version}")).unwrap_or_default();
+            let details = format!("{}{software}", t.driver_version(&gpu.driver_version, &gpu.driver_date));
+            ui.add(egui::Label::new(text(details, regular(12.5), pal.text_muted)).wrap());
+            if let GpuUpdate::Unknown(error) = update {
+                ui.add(egui::Label::new(text(t.vendor_check_failed(error), regular(12.5), pal.accent_text)).wrap());
+            }
+        });
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| match update {
+            GpuUpdate::Available { version, address } => {
+                if link(ui, t.download_and_install, pal.accent_text).clicked() {
+                    action = Some(DriversAction::RunInstaller(address.clone()));
+                }
+                ui.add_space(12.0);
+                ui.label(text(t.version_available(version), semibold(13.0), pal.text));
+            }
+            GpuUpdate::VendorPage(address) => {
+                if link(ui, t.open_vendor_page, pal.accent_text).clicked() {
+                    action = Some(DriversAction::OpenPage(address));
+                }
+            }
+            GpuUpdate::UpToDate | GpuUpdate::Unknown(_) => {}
+        });
+    });
+    ui.add_space(12.0);
+    rule(ui);
+    action
+}
+
+/// A driver update from Windows Update, with how its installation ended once it was tried.
+fn update_row(ui: &mut Ui, t: &Texts, update: &drivers::Update, outcome: Option<&drivers::Installed>, selection: &mut HashSet<String>) {
+    let pal = palette(ui.ctx());
+    let installed = outcome.is_some_and(drivers::Installed::succeeded);
+    ui.add_space(12.0);
+    ui.horizontal_top(|ui| {
+        let mut checked = selection.contains(&update.id);
+        if bare_checkbox(ui, &mut checked, &update.title, !installed).changed() {
+            match checked {
+                true => selection.insert(update.id.clone()),
+                false => selection.remove(&update.id),
+            };
+        }
+        ui.add_space(10.0);
+        let text_width = ui.available_width() - 120.0;
+        ui.vertical(|ui| {
+            ui.set_width(text_width);
+            ui.add(egui::Label::new(text(&update.title, semibold(14.5), if installed { pal.text_faint } else { pal.text })).wrap());
+            ui.horizontal(|ui| {
+                ui.label(text(format!("{}  ·  {}", update.provider, update.date), regular(12.5), pal.text_muted));
+                if update.is_firmware() {
+                    tag(ui, t.tag_firmware, pal.accent_text);
+                }
+                if installed {
+                    tag(ui, t.tag_installed, pal.text_muted);
+                }
+            });
+            if update.is_firmware() {
+                ui.add(egui::Label::new(text(t.firmware_hint, regular(12.5), pal.accent_text)).wrap());
+            }
+            if let Some(failed) = outcome.filter(|o| !o.succeeded()) {
+                ui.label(text(t.driver_failed(failed.code), semibold(12.5), pal.accent_text));
+            }
+        });
+        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            ui.label(text(t.size(update.bytes), semibold(14.5), pal.text));
+        });
+    });
+    ui.add_space(12.0);
+    rule(ui);
+}
+
 /// An app uninstalled from this page, with a way back through the Microsoft Store.
 fn removed_app_row(ui: &mut Ui, t: &Texts, item: &debloat::Item) -> Option<DebloatAction> {
     let pal = palette(ui.ctx());
@@ -1589,7 +2112,7 @@ fn cleanup_report(t: &Texts, catalog: &Catalog, results: &[CleanupResult], warni
     let freed: u64 = results.iter().map(|r| r.tally.bytes).sum();
     let recycled: u64 = results.iter().map(|r| r.tally.recycled).sum();
     let mut lines = vec![
-        format!("{BRAND_FIRST_LINE} {BRAND_SECOND_LINE} {}", env!("CARGO_PKG_VERSION")),
+        format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION")),
         format!("{}: {}", t.report_title, t.date(&storage::now_local())),
         String::new(),
         format!("{}: {}", t.freed, t.size(freed)),

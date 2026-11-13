@@ -50,38 +50,99 @@ jobs:
 
       - name: Build
         env:
-          MJL_REQUIRE_RESOURCES: "1"
+          CLUTCH_REQUIRE_RESOURCES: "1"
         run: cargo build --release --locked
 
       - name: Check that the executable only needs Windows DLLs
         run: |
-          $dlls = objdump -p target\release\modo-jogo-limpeza.exe | Select-String 'DLL Name: (.+)' | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() }
+          $dlls = objdump -p target\release\clutch.exe | Select-String 'DLL Name: (.+)' | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() }
           $foreign = $dlls | Where-Object { $_ -match '^(libgcc|libwinpthread|libstdc\+\+|vcruntime|msvcp)' }
           if ($foreign) { throw "Unexpected DLL dependencies: $($foreign -join ', ')" }
           $dlls
+
+      - name: Upload the executable to be signed
+        id: unsigned
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned
+          path: target/release/clutch.exe
+
+      - name: Sign with SignPath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
 
       - name: Package
         run: |
           $tag = '${{ github.ref_name }}'
           $repository = '${{ github.repository }}'
-          New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target\release\modo-jogo-limpeza.exe dist\ModoJogoLimpeza.exe
-          $hash = (Get-FileHash dist\ModoJogoLimpeza.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  ModoJogoLimpeza.exe" | Out-File dist\ModoJogoLimpeza.exe.sha256 -Encoding ascii -NoNewline
+          $owner = '${{ github.repository_owner }}'
+          $version = $tag.TrimStart('v')
+          $description = 'Game Mode, Eco Mode, safe storage cleanup and driver updates for Windows'
+          $executable = 'target\release\clutch.exe'
+          if (Test-Path signed\clutch.exe) { $executable = 'signed\clutch.exe' }
+          New-Item -ItemType Directory dist\winget | Out-Null
+          Copy-Item $executable dist\Clutch.exe
+          $hash = (Get-FileHash dist\Clutch.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  Clutch.exe" | Out-File dist\Clutch.exe.sha256 -Encoding ascii -NoNewline
           [ordered]@{
-            version     = $tag.TrimStart('v')
-            description = 'Game Mode and safe storage cleanup for Windows'
+            version     = $version
+            description = $description
             homepage    = "https://github.com/$repository"
-            license     = 'Proprietary'
-            url         = "https://github.com/$repository/releases/download/$tag/ModoJogoLimpeza.exe"
+            license     = 'MIT'
+            url         = "https://github.com/$repository/releases/download/$tag/Clutch.exe"
             hash        = $hash
-            bin         = 'ModoJogoLimpeza.exe'
-            shortcuts   = @(, @('ModoJogoLimpeza.exe', 'Modo Jogo e Limpeza'))
-          } | ConvertTo-Json -Depth 4 | Out-File dist\modo-jogo-limpeza.json -Encoding utf8NoBOM
+            bin         = 'Clutch.exe'
+            shortcuts   = @(, @('Clutch.exe', 'Clutch'))
+          } | ConvertTo-Json -Depth 4 | Out-File dist\clutch.json -Encoding utf8NoBOM
+          $id = "$owner.Clutch"
+          @"
+          PackageIdentifier: $id
+          PackageVersion: $version
+          DefaultLocale: en-US
+          ManifestType: version
+          ManifestVersion: 1.6.0
+          "@ | Out-File "dist\winget\$id.yaml" -Encoding utf8NoBOM
+          @"
+          PackageIdentifier: $id
+          PackageVersion: $version
+          InstallerType: portable
+          Commands:
+          - clutch
+          Installers:
+          - Architecture: x64
+            InstallerUrl: https://github.com/$repository/releases/download/$tag/Clutch.exe
+            InstallerSha256: $($hash.ToUpper())
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          "@ | Out-File "dist\winget\$id.installer.yaml" -Encoding utf8NoBOM
+          @"
+          PackageIdentifier: $id
+          PackageVersion: $version
+          PackageLocale: en-US
+          Publisher: $owner
+          PublisherUrl: https://github.com/$owner
+          PackageName: Clutch
+          PackageUrl: https://github.com/$repository
+          License: MIT
+          LicenseUrl: https://github.com/$repository/blob/$tag/LICENSE
+          ShortDescription: $description
+          ManifestType: defaultLocale
+          ManifestVersion: 1.6.0
+          "@ | Out-File "dist\winget\$id.locale.en-US.yaml" -Encoding utf8NoBOM
+          Compress-Archive -Path dist\winget\* -DestinationPath dist\winget-manifest.zip
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = '${{ github.ref_name }}'
-          gh release create $tag dist\ModoJogoLimpeza.exe dist\ModoJogoLimpeza.exe.sha256 dist\modo-jogo-limpeza.json --title $tag --generate-notes
+          gh release create $tag dist\Clutch.exe dist\Clutch.exe.sha256 dist\clutch.json dist\winget-manifest.zip --title $tag --generate-notes
