@@ -10,9 +10,11 @@ The interface is available in Brazilian Portuguese and English. By default it fo
 
 ## Download
 
-Prebuilt executables are on the [Releases](https://github.com/danisommer/clutch/releases) page. The app is a single portable `Clutch.exe`: download it, put it in any folder and run it. Each release also has:
+Prebuilt files are on the [Releases](https://github.com/danisommer/clutch/releases) page. Each release has:
 
-- a `.sha256` file to check the download;
+- `Clutch-Setup.exe`, the installer. It installs for the current user, without administrator rights, and adds a Start menu shortcut and an entry in **Settings > Apps**. The installer of a newer version replaces the installed one. Uninstalling asks whether to remove your settings and history too, and is refused while Game Mode or Eco Mode is on, so the computer is restored first;
+- `Clutch.exe`, the same app as a single portable file: put it in any folder and run it;
+- a `.sha256` file for each of the two, to check the download;
 - `winget-manifest.zip`, the manifest for the Windows Package Manager. The app is not in the winget community repository yet;
 - a [Scoop](https://scoop.sh) manifest, which installs the app and adds a Start menu shortcut:
 
@@ -20,7 +22,7 @@ Prebuilt executables are on the [Releases](https://github.com/danisommer/clutch/
   scoop install https://github.com/danisommer/clutch/releases/latest/download/clutch.json
   ```
 
-The executable is not signed yet, so Windows SmartScreen may warn on the first run. Choose **More info**, then **Run anyway**.
+The files are not signed yet, so Windows SmartScreen may warn the first time you run a downloaded one. Choose **More info**, then **Run anyway**.
 
 ## Features
 
@@ -139,20 +141,23 @@ rustup default stable-x86_64-pc-windows-gnu
 .\build.ps1             # release build, installed in %LOCALAPPDATA%\Programs\Clutch
 .\build.ps1 -Shortcut   # same, plus a desktop shortcut
 .\build.ps1 -Debug      # debug build, not installed
+.\build.ps1 -Installer  # release build and target\release\Clutch-Setup.exe
 ```
 
 `build.ps1` looks for the binutils in `%USERPROFILE%\.cargo\mingw-as`, or in the folder given with `-Binutils`, and falls back to `PATH`. A plain `cargo build --release` also works when both tools are on `PATH`. The MSVC toolchain has not been tested yet.
 
 The icon and the version info shown in the file's Properties are embedded by [`build.rs`](build.rs). With the GNU toolchain this needs `windres.exe`, from the same binutils, in that folder or on `PATH` (or set `WINDRES` to its path). Without it the build still works and prints a warning.
 
+The installer is built from [`installer.iss`](installer.iss) with [Inno Setup](https://jrsoftware.org/isinfo.php) 6.3 or later. `build.ps1 -Installer` looks for `ISCC.exe` in `%ProgramFiles(x86)%\Inno Setup 6`, or in the folder given with `-InnoSetup`, and falls back to `PATH`.
+
 ### Releasing
 
 1. Change `version` in `Cargo.toml`, build once so `Cargo.lock` picks it up, and commit both.
 2. Push a tag with the same version, for example `git tag v0.2.0` and `git push origin v0.2.0`. Creating the release on GitHub with a new tag `v0.2.0` works too: the workflow adds the files to it.
 
-The [release workflow](.github/workflows/release.yml) runs the tests, builds with the GNU toolchain, requires the embedded resources, checks that the executable only depends on Windows DLLs and publishes the executable, its SHA-256, the Scoop manifest and the winget manifest.
+The [release workflow](.github/workflows/release.yml) runs the tests, builds with the GNU toolchain, requires the embedded resources, checks that the executable only depends on Windows DLLs, builds the installer and publishes the installer, the executable, their SHA-256 files, the Scoop manifest and the winget manifest.
 
-The workflow signs the executable through [SignPath](https://signpath.io) when the repository has the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG` and the secret `SIGNPATH_API_TOKEN`. Without them the signing steps are skipped and the release is unsigned.
+The workflow signs the executable and the installer through [SignPath](https://signpath.io) when the repository has the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG` and the secret `SIGNPATH_API_TOKEN`. Without them the signing steps are skipped and the release is unsigned.
 
 ### Tests
 
@@ -250,6 +255,7 @@ categories.json  cleanup catalog
 debloat.json     Decrapify catalog
 build.ps1        build and install script
 build.rs         embeds the icon and version info in the executable
+installer.iss    Inno Setup script of the installer
 assets/icon.ico  executable and shortcut icon
 .github/         release workflow
 ```
@@ -284,6 +290,7 @@ Ideas:
 - [x] Executable icon and version info embedded as Windows resources
 - [x] CI with tests on every release
 - [ ] Signed builds (the release workflow is ready; a certificate is still missing)
+- [x] Installer that replaces the installed version, with a Start menu shortcut and an uninstaller
 - [x] Distribution through Scoop (manifest in each release)
 - [ ] Distribution through winget (manifest in each release; not submitted to the community repository yet)
 - [x] Keyboard navigation and screen reader support
