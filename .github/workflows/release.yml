@@ -145,4 +145,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = '${{ github.ref_name }}'
-          gh release create $tag dist\Clutch.exe dist\Clutch.exe.sha256 dist\clutch.json dist\winget-manifest.zip --title $tag --generate-notes
+          $files = 'dist\Clutch.exe', 'dist\Clutch.exe.sha256', 'dist\clutch.json', 'dist\winget-manifest.zip'
+          gh release view $tag --json tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $files --clobber
+          } else {
+            gh release create $tag $files --title $tag --generate-notes
+          }
