@@ -2,7 +2,7 @@
 name = "clutch"
 version = "0.1.0"
 edition = "2024"
-description = "Game Mode and safe storage cleanup for Windows, in a small native app"
+description = "Game Mode, Eco Mode, safe storage cleanup and driver updates for Windows, in a small native app"
 license = "MIT"
 
 [dependencies]

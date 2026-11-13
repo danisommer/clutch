@@ -1,8 +1,8 @@
 # Clutch
 
-**Game Mode and safe storage cleanup for Windows, in a single ~2 MB native app.**
+**Game Mode, Eco Mode, safe storage cleanup and driver updates for Windows, in a single native app under 3 MB.**
 
-Clutch prepares the computer for a gaming session and puts it back the way it was afterwards. It can also find and remove temporary files, caches and leftovers, deleting nothing until you confirm.
+Clutch prepares the computer for a gaming session, or for a long stretch on battery, and puts it back the way it was afterwards. It can also find and remove temporary files, caches and leftovers, and look for newer drivers. Nothing is deleted or installed until you confirm.
 
 The app used to be called *Modo Jogo e Limpeza*. Its settings and history move to the new folder the first time Clutch runs.
 
@@ -13,6 +13,7 @@ The interface is available in Brazilian Portuguese and English. By default it fo
 Prebuilt executables are on the [Releases](https://github.com/danisommer/modo-jogo-limpeza/releases) page. The app is a single portable `Clutch.exe`: download it, put it in any folder and run it. Each release also has:
 
 - a `.sha256` file to check the download;
+- `winget-manifest.zip`, the manifest for the Windows Package Manager. The app is not in the winget community repository yet;
 - a [Scoop](https://scoop.sh) manifest, which installs the app and adds a Start menu shortcut:
 
   ```powershell
@@ -149,7 +150,9 @@ The icon and the version info shown in the file's Properties are embedded by [`b
 1. Change `version` in `Cargo.toml`, build once so `Cargo.lock` picks it up, and commit both.
 2. Push a tag with the same version, for example `git tag v0.2.0` and `git push origin v0.2.0`.
 
-The [release workflow](.github/workflows/release.yml) runs the tests, builds with the GNU toolchain, requires the embedded resources, checks that the executable only depends on Windows DLLs and publishes the executable, its SHA-256 and the Scoop manifest.
+The [release workflow](.github/workflows/release.yml) runs the tests, builds with the GNU toolchain, requires the embedded resources, checks that the executable only depends on Windows DLLs and publishes the executable, its SHA-256, the Scoop manifest and the winget manifest.
+
+The workflow signs the executable through [SignPath](https://signpath.io) when the repository has the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG` and the secret `SIGNPATH_API_TOKEN`. Without them the signing steps are skipped and the release is unsigned.
 
 ### Tests
 
@@ -280,9 +283,9 @@ Ideas:
 - [x] Exportable cleanup report
 - [x] Executable icon and version info embedded as Windows resources
 - [x] CI with tests on every release
-- [ ] Signed builds
+- [ ] Signed builds (the release workflow is ready; a certificate is still missing)
 - [x] Distribution through Scoop (manifest in each release)
-- [ ] Distribution through winget
+- [ ] Distribution through winget (manifest in each release; not submitted to the community repository yet)
 - [x] Keyboard navigation and screen reader support
 
 ## License

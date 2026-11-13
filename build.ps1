@@ -53,7 +53,7 @@ if ($Shortcut) {
     $lnk.TargetPath = $exe
     $lnk.WorkingDirectory = $destination
     $lnk.IconLocation = "$icon,0"
-    $lnk.Description = 'Game Mode and storage cleanup'
+    $lnk.Description = 'Game Mode, Eco Mode, storage cleanup and driver updates'
     $lnk.Save()
     Write-Host "Shortcut created: $link"
 }
