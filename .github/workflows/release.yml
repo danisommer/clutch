@@ -80,6 +80,35 @@ jobs:
           wait-for-completion: true
           output-artifact-directory: signed
 
+      - name: Build the installer
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $executable = 'target\release\clutch.exe'
+          if (Test-Path signed\clutch.exe) { $executable = 'signed\clutch.exe' }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
+          & $iscc /Q "/DAppVersion=$version" "/DExecutable=$executable" installer.iss
+
+      - name: Upload the installer to be signed
+        id: unsigned-installer
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: target/release/Clutch-Setup.exe
+
+      - name: Sign the installer with SignPath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-installer
+
       - name: Package
         run: |
           $tag = '${{ github.ref_name }}'
@@ -89,10 +118,15 @@ jobs:
           $description = 'Game Mode, Eco Mode, safe storage cleanup and driver updates for Windows'
           $executable = 'target\release\clutch.exe'
           if (Test-Path signed\clutch.exe) { $executable = 'signed\clutch.exe' }
+          $installer = 'target\release\Clutch-Setup.exe'
+          if (Test-Path signed-installer\Clutch-Setup.exe) { $installer = 'signed-installer\Clutch-Setup.exe' }
           New-Item -ItemType Directory dist\winget | Out-Null
           Copy-Item $executable dist\Clutch.exe
+          Copy-Item $installer dist\Clutch-Setup.exe
           $hash = (Get-FileHash dist\Clutch.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  Clutch.exe" | Out-File dist\Clutch.exe.sha256 -Encoding ascii -NoNewline
+          $installerHash = (Get-FileHash dist\Clutch-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          "$installerHash  Clutch-Setup.exe" | Out-File dist\Clutch-Setup.exe.sha256 -Encoding ascii -NoNewline
           [ordered]@{
             version     = $version
             description = $description
@@ -145,7 +179,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = '${{ github.ref_name }}'
-          $files = 'dist\Clutch.exe', 'dist\Clutch.exe.sha256', 'dist\clutch.json', 'dist\winget-manifest.zip'
+          $files = 'dist\Clutch-Setup.exe', 'dist\Clutch-Setup.exe.sha256', 'dist\Clutch.exe', 'dist\Clutch.exe.sha256', 'dist\clutch.json', 'dist\winget-manifest.zip'
           gh release view $tag --json tagName 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $files --clobber
